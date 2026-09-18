@@ -1,0 +1,286 @@
+/* =========================================================================
+   STATE.JS — Single source of truth for the game.
+   Nothing in here touches the DOM or canvas. Pure data + pure functions.
+   This is deliberately the ONLY module that SaveSystem needs to know about.
+   ========================================================================= */
+
+// ---- Physics constants (tuned for playability, not real-world accuracy) ----
+// Time-warp/time-scale is currently fixed at 1x (real-time) per current
+// design — the multi-speed warp UI was removed in favor of a simple
+// pause/run toggle, since attitude-based flying (rotate/burn/align) reads
+// far better in real time than compressed. TIME_SCALE_DEFAULT is kept as
+// a single easy-to-find knob in case warp returns later (e.g. for long
+// interplanetary cruises), rather than hardcoding 1 in multiple places.
+const PHYSICS = {
+  TIME_SCALE_DEFAULT: 1,
+};
+
+// ---- Body "kinds" — used for rendering + future gameplay hooks ----
+const BodyKind = {
+  STAR: 'star',
+  PLANET: 'planet',
+  MOON: 'moon',
+  STATION: 'station',
+  ASTEROID: 'asteroid',
+};
+
+/* -------------------------------------------------------------------------
+   CelestialBody — anything that orbits (or sits at) a fixed point.
+   Circular orbits only, per design brief, EXCEPT the player's ship which
+   is propagated with real two-body physics elsewhere (ship.js).
+
+   parentId === null means "fixed at system origin" (the primary star).
+   A body may itself be a parent (planet -> moons -> could even be a
+   station orbiting a moon). This makes multi-star / nested systems free.
+------------------------------------------------------------------------- */
+function makeBody({
+  id, name, kind, parentId = null,
+  orbitRadius = 0,      // Mm from parent
+  orbitAngle = 0,        // radians, initial position
+  angularVelocity = 0,   // radians / sim-second (derived from mu if omitted)
+  radius,                // visual/physical radius in Mm (for collision + draw)
+  mu = 0,                // standard gravitational parameter of THIS body
+                         // (used for things orbiting IT, and for ship gravity)
+  color = '#33ff33',
+  parentMu = 0,          // mu of the parent, used to derive angularVelocity
+}) {
+  let av = angularVelocity;
+  if (!av && orbitRadius > 0 && parentMu > 0) {
+    // Circular orbit angular velocity: omega = sqrt(mu_parent / r^3)
+    av = Math.sqrt(parentMu / Math.pow(orbitRadius, 3));
+  }
+  return {
+    id, name, kind, parentId,
+    orbitRadius, orbitAngle, angularVelocity: av,
+    radius, mu, color,
+  };
+}
+
+/* -------------------------------------------------------------------------
+   Default single star system ("Sol-analog" but fictional so we're not
+   claiming real ephemeris accuracy). Easy to add more systems: just push
+   another entry into GameState.systems[].
+------------------------------------------------------------------------- */
+// Given a desired "sphere of influence" radius (how far a planet's own
+// gravity should meaningfully dominate the star's), solve for the mu the
+// planet needs. This is a simplified Hill-sphere relation:
+//   r_hill ≈ R * (mu_planet / (3 * mu_star)) ^ (1/3)
+// Solving for mu_planet keeps every planet's "playable orbit space"
+// consistent regardless of how far out it sits, which is what stops the
+// star's gravity from ripping the ship out of a planetary orbit the
+// moment we add more bodies later.
+function muForSoi(starMu, orbitRadius, desiredSoiRadius) {
+  return 3 * starMu * Math.pow(desiredSoiRadius / orbitRadius, 3);
+}
+
+function createDefaultSystem() {
+  const bodies = [];
+
+  const starMu = 1.327e6; // fictional, tuned for nice orbital periods
+  bodies.push(makeBody({
+    id: 'sol', name: 'Sol', kind: BodyKind.STAR,
+    parentId: null, radius: 60, mu: starMu, color: '#ffe066',
+  }));
+
+  // Four starter planets, evenly spaced, tuned so their periods feel
+  // distinct at default time-scale (innermost fast, outer slow). Each
+  // planet's "soi" is the sphere of influence we want it to have — big
+  // enough to comfortably hold moons, a station, and the player's ship
+  // in a stable orbit without the star's gravity dominating.
+  const planetDefs = [
+    { id: 'aldrin',  name: 'Aldrin',  orbitRadius: 1200, radius: 8,  soi: 220, color: '#8fd6ff' },
+    { id: 'meridian',name: 'Meridian',orbitRadius: 2200, radius: 11, soi: 340, color: '#33ff99' },
+    { id: 'vesper',  name: 'Vesper',  orbitRadius: 3600, radius: 10, soi: 460, color: '#ff9955' },
+    { id: 'kryos',   name: 'Kryos',   orbitRadius: 5400, radius: 14, soi: 620, color: '#66ffff' },
+  ];
+
+  planetDefs.forEach((p, i) => {
+    const mu = muForSoi(starMu, p.orbitRadius, p.soi);
+    bodies.push(makeBody({
+      id: p.id, name: p.name, kind: BodyKind.PLANET, parentId: 'sol',
+      orbitRadius: p.orbitRadius, radius: p.radius, mu, color: p.color,
+      orbitAngle: (i / planetDefs.length) * Math.PI * 2,
+      parentMu: starMu,
+    }));
+
+    // Two moons per planet, well inside the planet's SOI so they (and
+    // anything orbiting near them) stay gravitationally "owned" by the
+    // planet rather than the star. Starting angles are deterministic
+    // (not Math.random()) so every new game starts from the same, known
+    // -safe configuration rather than an occasional unlucky seed placing
+    // a moon somewhere that perturbs the player's starting orbit.
+    for (let m = 0; m < 2; m++) {
+      const moonOrbitR = p.soi * (0.25 + m * 0.15);
+      bodies.push(makeBody({
+        id: `${p.id}-moon${m + 1}`,
+        name: `${p.name} ${m === 0 ? 'I' : 'II'}`,
+        kind: BodyKind.MOON,
+        parentId: p.id,
+        orbitRadius: moonOrbitR,
+        orbitAngle: (i * 0.9 + m * 2.4), // fixed, spread out, deterministic
+        radius: p.radius * 0.25,
+        mu: mu * 0.01, // small enough moons don't fight the planet's own field
+        color: '#aaaaaa',
+        parentMu: mu,
+      }));
+    }
+  });
+
+  // Example stations, proving out "station orbits anything": one around
+  // a planet, one around the star itself — both well within a stable SOI.
+  const aldrinMu = bodies.find(b => b.id === 'aldrin').mu;
+  bodies.push(makeBody({
+    id: 'aldrin-station', name: 'Aldrin Terminal', kind: BodyKind.STATION,
+    parentId: 'aldrin', orbitRadius: planetDefs[0].soi * 0.12,
+    orbitAngle: 1.2,
+    radius: 1.5, mu: 0, color: '#ffffff',
+    parentMu: aldrinMu,
+  }));
+  bodies.push(makeBody({
+    id: 'sol-station', name: 'Helios Anchorage', kind: BodyKind.STATION,
+    parentId: 'sol', orbitRadius: 700,
+    orbitAngle: 4.0,
+    radius: 1.5, mu: 0, color: '#ffffff',
+    parentMu: starMu,
+  }));
+
+  return {
+    id: 'sol-system',
+    name: 'Sol System',
+    bodies,
+  };
+}
+
+/* -------------------------------------------------------------------------
+   Default new-game state. This whole object is what gets saved/loaded.
+   Extra top-level keys (landing, eva, trade, combat, crew...) can be added
+   later without breaking old saves as long as SaveSystem.load fills
+   sensible defaults for missing keys (see save.js migrate()).
+------------------------------------------------------------------------- */
+function createNewGameState() {
+  const system = createDefaultSystem();
+  const aldrin = system.bodies.find(b => b.id === 'aldrin');
+
+  // Start the player in a stable circular orbit around the first planet.
+  // Work entirely in world-space (star-centered) coordinates: take
+  // Aldrin's current world position + velocity, then add a perpendicular
+  // orbital velocity component for the ship. This is what makes the
+  // start state a genuine two-body circular orbit instead of a stray
+  // vector that happens to look plausible.
+  const aldrinPos = Physics.worldPosition(system, aldrin);
+  const aldrinVel = bodyWorldVelocity(system, aldrin);
+
+  const startOrbitR = Math.max(
+    aldrin.radius * 4,  // healthy clearance above the planet's own surface
+    Math.min(aldrin.radius * 6, innermostMoonOrbitRadius(system, aldrin) * 0.15)
+  );
+  // Clamped well below whatever moons exist so the ship starts in "clean"
+  // two-body space. Even a small, distant moon exerts a non-zero
+  // perturbation on a nearby orbit, and over hundreds to thousands of
+  // orbits that perturbation can resonantly pump up eccentricity until
+  // the orbit becomes unstable — this is genuine orbital mechanics (the
+  // same effect behind real Kirkwood gaps), but bad for a predictable
+  // starting position, so the margin here is generous (0.15x, not 0.4x)
+  // specifically to keep the DEFAULT start orbit boring and stable.
+  // Also floored well above the planet's physical radius so the ship
+  // doesn't start in the region where gravity softening (see gravityAt)
+  // distorts the force law at exactly the scale of its orbit.
+  const shipRelSpeed = Math.sqrt(aldrin.mu / startOrbitR);
+
+  // Place the ship "above" Aldrin (local +y) moving in +x relative to
+  // Aldrin, i.e. a clean perpendicular circular orbit in the local frame.
+  const shipX = aldrinPos.x;
+  const shipY = aldrinPos.y + startOrbitR;
+  const shipVx = aldrinVel.vx + shipRelSpeed;
+  const shipVy = aldrinVel.vy;
+
+  return {
+    meta: {
+      version: 1,
+      createdAt: Date.now(),
+      savedAt: null,
+      playTimeSeconds: 0,
+    },
+    time: {
+      simSeconds: 0,             // total elapsed simulated time
+      timeScale: PHYSICS.TIME_SCALE_DEFAULT,
+      paused: false,
+    },
+    systems: [system],
+    currentSystemId: system.id,
+    player: {
+      location: 'space',        // 'space' | 'landed' | 'docked' | 'eva' (future)
+      ship: {
+        // Position/velocity are in the CURRENT system's coordinate frame,
+        // centered on that system's root body (the star), units Mm and Mm/s.
+        x: shipX,
+        y: shipY,
+        vx: shipVx,
+        vy: shipVy,
+        heading: Math.atan2(shipVy - aldrinVel.vy, shipVx - aldrinVel.vx),
+        // Ship's facing direction in radians (0 = world +x axis, standard
+        // math convention matching the canvas trig already used
+        // elsewhere). Starts pointing prograde (along its own orbital
+        // velocity) so a fresh game already looks intentional rather
+        // than facing an arbitrary direction.
+        angularVelocity: 0, // radians/sec, changed by rotate controls
+        alignTarget: null,  // 'prograde' | 'retrograde' | null — when set,
+                             // the ship rotates itself toward that facing
+                             // each frame instead of drifting freely;
+                             // any manual rotation input cancels it.
+        referenceBodyId: 'aldrin', // for display purposes ("orbiting Aldrin")
+        fuel: 1000,
+        fuelMax: 1000,
+        oxygen: 100,
+        oxygenMax: 100,
+        supplies: 100,
+        suppliesMax: 100,
+        hull: 100,
+        hullMax: 100,
+        name: 'Wanderer',
+      },
+    },
+    camera: {
+      x: 0, y: 0, zoom: 1, // filled in properly by starmap.js on first run
+      followShip: true,    // when true, camera re-centers on the ship every
+                            // frame instead of being freely panned — the
+                            // default, since attitude-based flying is much
+                            // easier to follow with the ship kept in view.
+    },
+    flags: {},
+  };
+}
+
+// Smallest orbitRadius among any direct child of a body that has REAL
+// MASS (mu > 0) — stations are massless in this model and shouldn't
+// constrain where it's safe to start an orbit, only moons/other bodies
+// that can actually perturb a nearby orbit via their own gravity.
+function innermostMoonOrbitRadius(system, body) {
+  const children = system.bodies.filter(b => b.parentId === body.id && b.orbitRadius > 0 && b.mu > 0);
+  if (children.length === 0) return Infinity;
+  return Math.min(...children.map(c => c.orbitRadius));
+}
+
+// World-space velocity of a body moving on its circular orbit, found by
+// differentiating position w.r.t. its own angular velocity and adding
+// its parent's world velocity recursively (so a moon's velocity includes
+// its planet's motion around the star, etc.)
+function bodyWorldVelocity(system, body) {
+  if (!body.parentId) return { vx: 0, vy: 0 };
+  const parent = system.bodies.find(b => b.id === body.parentId);
+  const parentVel = bodyWorldVelocity(system, parent);
+  const tangentialSpeed = body.orbitRadius * body.angularVelocity;
+  return {
+    vx: parentVel.vx - Math.sin(body.orbitAngle) * tangentialSpeed,
+    vy: parentVel.vy + Math.cos(body.orbitAngle) * tangentialSpeed,
+  };
+}
+
+// ---- Lookup helpers used across modules ----
+function getCurrentSystem(state) {
+  return state.systems.find(s => s.id === state.currentSystemId);
+}
+function getBody(state, id) {
+  const sys = getCurrentSystem(state);
+  return sys ? sys.bodies.find(b => b.id === id) : null;
+}

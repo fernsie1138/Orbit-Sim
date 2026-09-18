@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>WANDERER — Navigation Console</title>
+<style>
+  :root {
+    --green: #33ff33;
+    --green-dim: #1a7a1a;
+    --green-bright: #a6ffa6;
+    --bg: #000000;
+    --amber: #ffb000;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #000;
+    overflow: hidden;
+    font-family: "Courier New", "Share Tech Mono", monospace;
+    color: var(--green);
+  }
+
+  #bezel {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    background: #000;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  #screen {
+    position: relative;
+    flex: 1;
+    margin: 8px;
+    border: 2px solid var(--green-dim);
+    border-radius: 10px;
+    box-shadow: 0 0 24px rgba(51,255,51,0.15) inset, 0 0 12px rgba(51,255,51,0.08);
+    overflow: hidden;
+  }
+
+  canvas#map {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    display: block;
+  }
+
+  /* ---------- HUD ---------- */
+  .hud-corner {
+    position: absolute;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.55;
+    letter-spacing: 0.5px;
+    text-shadow: 0 0 6px rgba(51,255,51,0.6);
+    pointer-events: none;
+  }
+  #hud-top-left { top: 0; left: 0; }
+  #hud-top-right { top: 0; right: 0; text-align: right; }
+  #hud-bottom-left { bottom: 0; left: 0; }
+
+  .stat-row { display: flex; gap: 8px; align-items: center; white-space: nowrap; }
+  .stat-label { width: 66px; display: inline-block; opacity: 0.85; }
+  .bar {
+    width: 90px; height: 8px;
+    border: 1px solid var(--green-dim);
+    position: relative;
+    display: inline-block;
+  }
+  .bar-fill { position: absolute; top: 0; left: 0; bottom: 0; background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .bar-fill.warn { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+  .bar-fill.crit { background: #ff3333; box-shadow: 0 0 6px #ff3333; }
+
+  /* ---------- Bottom control bar ---------- */
+  #controls {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+    pointer-events: none;
+  }
+  #controls > * { pointer-events: auto; }
+
+  .btn {
+    font-family: inherit;
+    background: rgba(0,20,0,0.7);
+    border: 1px solid var(--green-dim);
+    color: var(--green);
+    padding: 10px 14px;
+    font-size: 12px;
+    letter-spacing: 1px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    backdrop-filter: blur(2px);
+  }
+  .btn:active { background: rgba(51,255,51,0.25); }
+  .btn.primary { border-color: var(--green); color: var(--green-bright); }
+  .btn.small { padding: 8px 10px; font-size: 11px; }
+
+  #flight-controls {
+    position: absolute;
+    right: 14px; bottom: 70px;
+    display: grid;
+    grid-template-columns: repeat(2, 56px);
+    grid-auto-rows: 52px;
+    gap: 6px;
+    pointer-events: auto;
+  }
+  #flight-controls .btn {
+    width: 100%; height: 100%; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; line-height: 1.2; text-align: center;
+  }
+  #flight-controls .btn.wide { grid-column: span 2; }
+  #flight-controls .btn.active { background: rgba(51,255,51,0.35); color: var(--green-bright); }
+  #flight-controls .btn.rotate { font-size: 20px; }
+
+  #left-controls {
+    position: absolute;
+    left: 14px; bottom: 70px;
+    display: flex; flex-direction: column; gap: 6px;
+    pointer-events: auto;
+  }
+  #speed-controls {
+    display: flex; gap: 4px;
+  }
+  #speed-controls .btn { flex: 1; padding: 8px 6px; }
+  #speed-controls .btn.active { background: rgba(51,255,51,0.35); color: var(--green-bright); }
+
+  /* ---------- Menus ---------- */
+  .overlay {
+    position: absolute; inset: 0;
+    background: rgba(0,10,0,0.92);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+  }
+  .overlay.visible { display: flex; }
+  .panel {
+    border: 1px solid var(--green);
+    box-shadow: 0 0 20px rgba(51,255,51,0.3);
+    padding: 24px 28px;
+    min-width: 280px;
+    max-width: 90vw;
+    background: #001400;
+  }
+  .panel h2 {
+    margin: 0 0 16px 0;
+    font-size: 15px;
+    letter-spacing: 2px;
+    color: var(--green-bright);
+    border-bottom: 1px solid var(--green-dim);
+    padding-bottom: 8px;
+  }
+  .panel .row { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+  .panel-close { margin-top: 14px; display: flex; justify-content: flex-end; }
+
+  #menu-btn {
+    position: absolute; top: 8px; right: 8px;
+    pointer-events: auto;
+  }
+
+  .scanline-overlay {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0) 0px,
+      rgba(0,0,0,0) 1px,
+      rgba(0,0,0,0.08) 2px
+    );
+    mix-blend-mode: multiply;
+    animation: flicker 6s infinite;
+  }
+  @keyframes flicker {
+    0%, 100% { opacity: 1; }
+    92% { opacity: 1; }
+    93% { opacity: 0.85; }
+    94% { opacity: 1; }
+  }
+
+  #toast {
+    position: absolute;
+    top: 44px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 12px;
+    padding: 6px 14px;
+    border: 1px solid var(--green-dim);
+    background: rgba(0,20,0,0.85);
+    letter-spacing: 1px;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  #toast.visible { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="bezel">
+  <div id="screen">
+    <canvas id="map"></canvas>
+
+    <div class="hud-corner" id="hud-top-left">
+      <div id="hud-location">SYSTEM: —</div>
+      <div id="hud-refbody">TRACKING: —</div>
+      <div id="hud-speed">V: 0.00 km/s</div>
+      <div id="hud-orbit">AP: — PE: —</div>
+    </div>
+
+    <div class="hud-corner" id="hud-top-right">
+      <div id="hud-clock">T+ 00:00:00</div>
+      <div id="hud-warp">RUNNING</div>
+    </div>
+
+    <div class="hud-corner" id="hud-bottom-left">
+      <div class="stat-row"><span class="stat-label">FUEL</span><div class="bar"><div class="bar-fill" id="bar-fuel"></div></div></div>
+      <div class="stat-row"><span class="stat-label">OXYGEN</span><div class="bar"><div class="bar-fill" id="bar-oxygen"></div></div></div>
+      <div class="stat-row"><span class="stat-label">SUPPLY</span><div class="bar"><div class="bar-fill" id="bar-supplies"></div></div></div>
+      <div class="stat-row"><span class="stat-label">HULL</span><div class="bar"><div class="bar-fill" id="bar-hull"></div></div></div>
+    </div>
+
+    <button class="btn small" id="menu-btn">≡ MENU</button>
+
+    <div id="left-controls">
+      <button class="btn small" id="btn-pause">⏸ PAUSE</button>
+      <button class="btn small" id="btn-follow-ship">◎ FOLLOW: ON</button>
+      <div id="speed-controls">
+        <button class="btn small" data-speed="1">1x</button>
+        <button class="btn small" data-speed="5">5x</button>
+        <button class="btn small" data-speed="10">10x</button>
+      </div>
+    </div>
+
+    <div id="flight-controls">
+      <button class="btn rotate" id="btn-rotate-left" title="Rotate Left">↺</button>
+      <button class="btn rotate" id="btn-rotate-right" title="Rotate Right">↻</button>
+      <button class="btn wide" id="btn-burn" title="Burn">▲ BURN</button>
+      <button class="btn" id="btn-align-prograde" title="Align Prograde">PRO<br>GRADE</button>
+      <button class="btn" id="btn-align-retrograde" title="Align Retrograde">RETRO<br>GRADE</button>
+    </div>
+
+    <div id="toast"></div>
+
+    <!-- Main menu overlay -->
+    <div class="overlay" id="menu-overlay">
+      <div class="panel">
+        <h2>WANDERER CONSOLE</h2>
+        <div class="row">
+          <button class="btn primary" id="btn-save">SAVE GAME</button>
+          <button class="btn" id="btn-load">LOAD GAME</button>
+          <button class="btn" id="btn-export">EXPORT SAVE FILE</button>
+          <button class="btn" id="btn-import">IMPORT SAVE FILE</button>
+          <button class="btn" id="btn-newgame">NEW GAME</button>
+          <button class="btn" id="btn-reset">RESET SIMULATION</button>
+          <input type="file" id="file-import" accept="application/json" style="display:none">
+        </div>
+        <div class="panel-close"><button class="btn" id="btn-close-menu">CLOSE</button></div>
+      </div>
+    </div>
+
+    <div class="scanline-overlay"></div>
+  </div>
+</div>
+
+<script src="state.js"></script>
+<script src="physics.js"></script>
+<script src="save.js"></script>
+<script src="starmap.js"></script>
+<script src="input.js"></script>
+<script>
+/* =========================================================================
+   MAIN.JS (inline) — Boots the game: loads or creates state, wires up
+   the render/physics loop, HUD updates, and menu buttons.
+   ========================================================================= */
+
+let gameState = SaveSystem.load() || createNewGameState();
+
+const canvas = document.getElementById('map');
+StarMap.init(canvas);
+
+// Give the camera a sane default on first-ever boot (fresh state has
+// camera.zoom = 1 which is way too zoomed in for a whole system).
+if (gameState.camera.zoom === 1 && gameState.meta.savedAt === null) {
+  gameState.camera.zoom = 0.06;
+  gameState.camera.x = 0;
+  gameState.camera.y = 0;
+}
+
+Input.init(canvas, gameState, () => {}); // camera mutates gameState directly
+
+// ---- Flight controls: rotate + burn are HELD (pressed/released), not
+// single taps, since the ship now has continuous attitude control. We
+// track raw press state here and read it once per frame in the main
+// loop, rather than mutating physics directly from the event handlers —
+// keeps all physics changes flowing through Physics.step() in one place.
+const heldControls = { rotate: 0, thrust: false };
+
+function bindHold(el, onStart, onEnd) {
+  // Pointer events (not click) so holding actually tracks press/release,
+  // and pointerleave/cancel are covered so a finger sliding off the
+  // button doesn't leave thrust stuck on — a real risk on a touchscreen.
+  el.addEventListener('pointerdown', (e) => { e.preventDefault(); onStart(); });
+  el.addEventListener('pointerup', onEnd);
+  el.addEventListener('pointercancel', onEnd);
+  el.addEventListener('pointerleave', onEnd);
+}
+
+const btnRotateLeft = document.getElementById('btn-rotate-left');
+const btnRotateRight = document.getElementById('btn-rotate-right');
+const btnBurn = document.getElementById('btn-burn');
+
+bindHold(btnRotateLeft,
+  () => { heldControls.rotate = -1; btnRotateLeft.classList.add('active'); },
+  () => { if (heldControls.rotate === -1) heldControls.rotate = 0; btnRotateLeft.classList.remove('active'); });
+
+bindHold(btnRotateRight,
+  () => { heldControls.rotate = 1; btnRotateRight.classList.add('active'); },
+  () => { if (heldControls.rotate === 1) heldControls.rotate = 0; btnRotateRight.classList.remove('active'); });
+
+bindHold(btnBurn,
+  () => { heldControls.thrust = true; btnBurn.classList.add('active'); },
+  () => { heldControls.thrust = false; btnBurn.classList.remove('active'); });
+
+// ---- Align prograde/retrograde: these SET a target the ship steers
+// toward every frame (see Physics.stepAttitude) rather than an instant
+// snap, so the rotation is visible and any manual rotate input cancels
+// it cleanly. Tapping the already-active one turns it off.
+const btnAlignPro = document.getElementById('btn-align-prograde');
+const btnAlignRetro = document.getElementById('btn-align-retrograde');
+
+function setAlignTarget(target) {
+  const ship = gameState.player.ship;
+  ship.alignTarget = (ship.alignTarget === target) ? null : target;
+  btnAlignPro.classList.toggle('active', ship.alignTarget === 'prograde');
+  btnAlignRetro.classList.toggle('active', ship.alignTarget === 'retrograde');
+}
+btnAlignPro.addEventListener('click', () => setAlignTarget('prograde'));
+btnAlignRetro.addEventListener('click', () => setAlignTarget('retrograde'));
+
+// ---- Pause ----
+const btnPause = document.getElementById('btn-pause');
+btnPause.addEventListener('click', () => {
+  gameState.time.paused = !gameState.time.paused;
+  btnPause.textContent = gameState.time.paused ? '▶ RESUME' : '⏸ PAUSE';
+});
+
+// ---- Speed (1x/5x/10x) ----
+// A modest, capped range rather than the old wide warp scale: attitude
+// flying (rotate/burn/align) needs to stay controllable, and 10x is
+// already fast enough to skip through a long coast without making burns
+// impossible to time.
+const speedButtons = document.querySelectorAll('[data-speed]');
+function setSpeedButtonsActive(scale) {
+  speedButtons.forEach(btn => btn.classList.toggle('active', Number(btn.dataset.speed) === scale));
+}
+speedButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    gameState.time.timeScale = Number(btn.dataset.speed);
+    setSpeedButtonsActive(gameState.time.timeScale);
+  });
+});
+setSpeedButtonsActive(gameState.time.timeScale);
+
+// ---- Follow-ship camera toggle ----
+const btnFollow = document.getElementById('btn-follow-ship');
+btnFollow.addEventListener('click', () => {
+  const on = !gameState.camera.followShip;
+  Input.setFollowShip(on);
+  btnFollow.textContent = on ? '◎ FOLLOW: ON' : '◎ FOLLOW: OFF';
+});
+
+
+// ---- Menu wiring ----
+const menuOverlay = document.getElementById('menu-overlay');
+document.getElementById('menu-btn').onclick = () => menuOverlay.classList.add('visible');
+document.getElementById('btn-close-menu').onclick = () => menuOverlay.classList.remove('visible');
+
+// Whenever gameState is replaced wholesale (load/new game/import), the
+// control buttons need to resync their visual state to match — otherwise
+// e.g. the pause button could still say "RESUME" after loading a save
+// that wasn't paused, which would be a confusing, silently-wrong label.
+function syncControlButtonsToState() {
+  btnPause.textContent = gameState.time.paused ? '▶ RESUME' : '⏸ PAUSE';
+  btnFollow.textContent = gameState.camera.followShip ? '◎ FOLLOW: ON' : '◎ FOLLOW: OFF';
+  btnAlignPro.classList.toggle('active', gameState.player.ship.alignTarget === 'prograde');
+  btnAlignRetro.classList.toggle('active', gameState.player.ship.alignTarget === 'retrograde');
+  setSpeedButtonsActive(gameState.time.timeScale);
+  heldControls.rotate = 0;
+  heldControls.thrust = false;
+  btnRotateLeft.classList.remove('active');
+  btnRotateRight.classList.remove('active');
+  btnBurn.classList.remove('active');
+}
+
+document.getElementById('btn-save').onclick = () => {
+  const res = SaveSystem.save(gameState);
+  showToast(res.ok ? 'GAME SAVED' : 'SAVE FAILED');
+};
+document.getElementById('btn-load').onclick = () => {
+  const loaded = SaveSystem.load();
+  if (loaded) {
+    gameState = loaded;
+    Input.init(canvas, gameState, () => {}); // re-bind to new state object
+    syncControlButtonsToState();
+    showToast('GAME LOADED');
+    menuOverlay.classList.remove('visible');
+  } else {
+    showToast('NO SAVE FOUND');
+  }
+};
+// Shared by both "New Game" and "Reset Simulation" — right now these are
+// functionally identical (there's no persistent player progression yet
+// to distinguish "start fresh" from "put the current run back at its
+// starting point"), but kept as separate menu entries and a named
+// function since that will likely change once trading/engineering/
+// discovery add real progression a player wouldn't want reset.
+function resetToStart(confirmMessage, toastMessage) {
+  if (confirm(confirmMessage)) {
+    gameState = createNewGameState();
+    gameState.camera.zoom = 0.06;
+    Input.init(canvas, gameState, () => {});
+    syncControlButtonsToState();
+    showToast(toastMessage);
+    menuOverlay.classList.remove('visible');
+  }
+}
+document.getElementById('btn-newgame').onclick = () => {
+  resetToStart('Start a new game? Unsaved progress will be lost.', 'NEW GAME STARTED');
+};
+document.getElementById('btn-reset').onclick = () => {
+  resetToStart('Reset the simulation back to its starting state? Unsaved progress will be lost.', 'SIMULATION RESET');
+};
+document.getElementById('btn-export').onclick = () => SaveSystem.exportToFile(gameState);
+document.getElementById('btn-import').onclick = () => document.getElementById('file-import').click();
+document.getElementById('file-import').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  SaveSystem.importFromFile(file, (loaded, err) => {
+    if (err) { showToast('IMPORT FAILED'); return; }
+    gameState = loaded;
+    Input.init(canvas, gameState, () => {});
+    syncControlButtonsToState();
+    showToast('SAVE IMPORTED');
+    menuOverlay.classList.remove('visible');
+  });
+});
+
+// ---- Toast ----
+let toastTimer = null;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('visible'), 1500);
+}
+
+// ---- HUD update ----
+function fmtClock(simSeconds) {
+  const s = Math.floor(simSeconds);
+  const hh = Math.floor(s / 3600).toString().padStart(2, '0');
+  const mm = Math.floor((s % 3600) / 60).toString().padStart(2, '0');
+  const ss = Math.floor(s % 60).toString().padStart(2, '0');
+  return `T+ ${hh}:${mm}:${ss}`;
+}
+
+function setBar(id, pct) {
+  const el = document.getElementById(id);
+  el.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+  el.classList.remove('warn', 'crit');
+  if (pct < 15) el.classList.add('crit');
+  else if (pct < 40) el.classList.add('warn');
+}
+
+function updateHud() {
+  const ship = gameState.player.ship;
+  const system = getCurrentSystem(gameState);
+
+  document.getElementById('hud-location').textContent = `SYSTEM: ${system.name.toUpperCase()}`;
+
+  const near = Physics.nearestBody(system, ship);
+  document.getElementById('hud-refbody').textContent = `TRACKING: ${near ? near.name.toUpperCase() : '—'}`;
+
+  const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+  document.getElementById('hud-speed').textContent = `V: ${speed.toFixed(2)} km/s`;
+
+  const els = Physics.orbitalElements(system, ship);
+  const orbitEl = document.getElementById('hud-orbit');
+  if (els && els.closed) {
+    orbitEl.textContent = `AP: ${els.rApo.toFixed(1)} PE: ${els.rPeri.toFixed(1)}`;
+  } else {
+    orbitEl.textContent = 'AP: ESCAPE PE: —';
+  }
+
+  document.getElementById('hud-clock').textContent = fmtClock(gameState.time.simSeconds);
+  document.getElementById('hud-warp').textContent = gameState.time.paused ? 'PAUSED' : 'RUNNING';
+
+  setBar('bar-fuel', (ship.fuel / ship.fuelMax) * 100);
+  setBar('bar-oxygen', (ship.oxygen / ship.oxygenMax) * 100);
+  setBar('bar-supplies', (ship.supplies / ship.suppliesMax) * 100);
+  setBar('bar-hull', (ship.hull / ship.hullMax) * 100);
+}
+
+// ---- Main loop ----
+let lastTime = performance.now();
+function loop(now) {
+  const realDt = Math.min(0.1, (now - lastTime) / 1000); // clamp for tab-switch stalls
+  lastTime = now;
+
+  Physics.step(gameState, realDt, heldControls);
+  StarMap.draw(gameState);
+  updateHud();
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ---- Autosave on page hide (covers iPad Safari backgrounding/closing) ----
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) SaveSystem.save(gameState);
+});
+window.addEventListener('pagehide', () => SaveSystem.save(gameState));
+</script>
+</body>
+</html>
