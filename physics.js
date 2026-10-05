@@ -279,7 +279,7 @@ const Physics = (() => {
       ship.alignTarget = null;
       ship.heading += rotateInput * ROTATE_RATE * dt;
     } else if (ship.alignTarget === 'prograde' || ship.alignTarget === 'retrograde') {
-      const targetHeading = velocityHeading(ship, ship.alignTarget === 'retrograde');
+      const targetHeading = velocityHeading(system, ship, ship.alignTarget === 'retrograde');
       if (targetHeading !== null) {
         const diff = shortestAngleDiff(ship.heading, targetHeading);
         const step = ALIGN_ROTATE_RATE * dt;
@@ -295,15 +295,33 @@ const Physics = (() => {
   }
 
   // The ship's velocity direction (prograde) or its reverse (retrograde),
-  // in the same GLOBAL frame as ship.heading — deliberately NOT relative
-  // to the dominant body's own velocity, since "prograde" for piloting
-  // purposes means "the direction I'm currently moving across the map",
-  // which is what the projected trajectory line also shows. Returns null
-  // if the ship is nearly stationary (direction undefined).
-  function velocityHeading(ship, reversed) {
-    const speed = Math.hypot(ship.vx, ship.vy);
+  // relative to the ship's CURRENT DOMINANT BODY's own motion — matching
+  // what the projected orbit line on the star map actually shows (see
+  // starmap.js's drawTrajectory, which re-anchors the predicted path to
+  // the dominant body's live position specifically so the ellipse stays
+  // centered on whatever planet/moon/star the ship is currently
+  // orbiting). Using the ship's raw ABSOLUTE velocity here — as an
+  // earlier version of this function did — silently pointed "prograde"
+  // in a different direction than the visible orbit line's own direction
+  // of travel whenever the dominant body itself moves fast (e.g. a
+  // planet's ~25+ Mm/s solar orbital speed swamps a ship's much smaller
+  // ~5-10 Mm/s local orbital speed around it) — the same class of bug
+  // found and fixed in the navigation computer's burn targeting.
+  // Requires system so it can look up the dominant body and its own
+  // velocity; returns null if the ship's velocity relative to that body
+  // is nearly zero (direction undefined) or no dominant body exists.
+  function velocityHeading(system, ship, reversed) {
+    const positions = allWorldPositions(system);
+    const dom = dominantBody(system, ship.x, ship.y, positions);
+    let relVx = ship.vx, relVy = ship.vy;
+    if (dom) {
+      const domVel = bodyWorldVelocityAt(system, dom, positions);
+      relVx -= domVel.vx;
+      relVy -= domVel.vy;
+    }
+    const speed = Math.hypot(relVx, relVy);
     if (speed < 1e-6) return null;
-    const angle = Math.atan2(ship.vy, ship.vx);
+    const angle = Math.atan2(relVy, relVx);
     return reversed ? angle + Math.PI : angle;
   }
 
@@ -355,10 +373,19 @@ const Physics = (() => {
                                           // long pause could otherwise
                                           // hand a huge realSeconds to a
                                           // single frame.
+
+  // Exposed so callers that need to know the sim-seconds a frame will
+  // advance BEFORE calling step() itself (e.g. the autopilot, which must
+  // decide this frame's controls using the same dt step() will use) have
+  // one authoritative place to compute it, rather than a second copy of
+  // this formula drifting out of sync with the one inside step().
+  function frameDt(state, realSeconds) {
+    return Math.min(realSeconds * state.time.timeScale, MAX_SIM_SECONDS_PER_FRAME);
+  }
+
   function step(state, realSeconds, controls = null) {
     if (state.time.paused) return;
-    let dt = realSeconds * state.time.timeScale;
-    dt = Math.min(dt, MAX_SIM_SECONDS_PER_FRAME);
+    const dt = frameDt(state, realSeconds);
     const system = getCurrentSystem(state);
     const ship = state.player.ship;
 
@@ -515,7 +542,29 @@ const Physics = (() => {
       bodies: system.bodies.map(b => ({ ...b })), // shallow clone is enough;
     };                                             // fields are all primitives
 
-    const allPts = [{ x: ship.x, y: ship.y }];
+    // Each point also records its OFFSET from the dominant body at that
+    // instant (relX/relY = point - dominantBodyPositionAtThatInstant),
+    // not just the raw absolute (x,y). This is what lets the renderer
+    // draw an orbit around a PLANET so it visually stays centered on
+    // that planet as it moves, rather than tracing the ship's absolute
+    // path through space — which, for an orbit around a moving body,
+    // spirals along with that body's own motion and does NOT look like
+    // a closed ellipse even though the underlying physics is correct
+    // (confirmed: points stay within ~32 units of Aldrin's ACTUAL,
+    // moving position throughout, but drift to 277+ units from Aldrin's
+    // STARTING position, since Aldrin itself moves substantially over
+    // one full orbital period). The renderer re-anchors these offsets
+    // to the dominant body's CURRENT (live, render-time) position, so
+    // the drawn ellipse rides along with the planet instead of tracing
+    // a spiral through absolute space.
+    const initialPositions = allWorldPositions(scratch);
+    const initialDom = dominantBody(scratch, ship.x, ship.y, initialPositions);
+    const initialDomPos = initialDom ? initialPositions.get(initialDom.id) : { x: 0, y: 0 };
+    const allPts = [{
+      x: ship.x, y: ship.y,
+      relX: ship.x - initialDomPos.x, relY: ship.y - initialDomPos.y,
+      bodyId: initialDom ? initialDom.id : null,
+    }];
     let x = ship.x, y = ship.y, vx = ship.vx, vy = ship.vy;
     let remaining = durationSeconds;
     let guard = 0;
@@ -539,9 +588,16 @@ const Physics = (() => {
       vy += (h / 6) * (k1.dvy + 2 * k2.dvy + 2 * k3.dvy + k4.dvy);
 
       stepBodies(scratch, h); // advance the SCRATCH copy only
-
       remaining -= h;
-      allPts.push({ x, y });
+
+      // Record this point's offset from whatever body is dominant AT
+      // THIS INSTANT (usually the same body throughout one orbit, but
+      // computed fresh so a trajectory that crosses into a different
+      // SOI mid-prediction — e.g. near an escape — still gets a sane
+      // per-point anchor rather than one fixed body's position).
+      const pDom = dominantBody(scratch, x, y, positions);
+      const pDomPos = pDom ? positions.get(pDom.id) : { x: 0, y: 0 };
+      allPts.push({ x, y, relX: x - pDomPos.x, relY: y - pDomPos.y, bodyId: pDom ? pDom.id : null });
     }
 
     // Re-sample evenly across whatever we actually collected, so the
@@ -560,7 +616,7 @@ const Physics = (() => {
 
   return {
     worldPosition, allWorldPositions, findBody, dominantBody, stepBodies, gravityAt,
-    stepShip, applyBurn, thrustForward, stepAttitude, velocityHeading, step,
-    nearestBody, predictTrajectory, orbitalElements,
+    stepShip, applyBurn, thrustForward, stepAttitude, velocityHeading, step, frameDt,
+    nearestBody, predictTrajectory, orbitalElements, THRUST_ACCEL, bodyWorldVelocityAt,
   };
 })();

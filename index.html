@@ -98,14 +98,28 @@
   .btn.primary { border-color: var(--green); color: var(--green-bright); }
   .btn.small { padding: 8px 10px; font-size: 11px; }
 
-  #flight-controls {
+  #control-panel {
     position: absolute;
     right: 14px; bottom: 70px;
+    padding: 8px;
+    border: 1px solid var(--green-dim);
+    border-radius: 6px;
+    background: rgba(0,10,0,0.55);
+    pointer-events: auto;
+  }
+  #control-panel .panel-label {
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--green-dim);
+    text-align: center;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+  #flight-controls {
     display: grid;
     grid-template-columns: repeat(2, 56px);
     grid-auto-rows: 52px;
     gap: 6px;
-    pointer-events: auto;
   }
   #flight-controls .btn {
     width: 100%; height: 100%; padding: 0;
@@ -115,6 +129,37 @@
   #flight-controls .btn.wide { grid-column: span 2; }
   #flight-controls .btn.active { background: rgba(51,255,51,0.35); color: var(--green-bright); }
   #flight-controls .btn.rotate { font-size: 20px; }
+  #flight-controls .btn.navcomp { grid-column: span 2; border-color: var(--green); color: var(--green-bright); }
+
+  #navcomp-readout {
+    position: absolute;
+    right: 14px;
+    /* stacked below #control-panel; JS sets --panel-height so this sits
+       flush underneath regardless of how tall the control panel is on a
+       given screen size, rather than a hardcoded offset that could
+       overlap or leave an odd gap. */
+    bottom: calc(70px + var(--control-panel-height, 190px) + 8px);
+    width: 168px;
+    padding: 8px;
+    border: 1px solid var(--green-dim);
+    border-radius: 6px;
+    background: rgba(0,10,0,0.55);
+    pointer-events: none;
+    font-size: 10px;
+    line-height: 1.6;
+  }
+  #navcomp-readout .panel-label {
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--green-dim);
+    text-align: center;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+  #navcomp-readout-body { color: var(--green); white-space: pre-line; }
+  #navcomp-readout-body .idle { color: var(--green-dim); }
+  #navcomp-readout-body .label { color: var(--green-dim); }
+  #navcomp-readout-body .value { color: var(--green-bright); }
 
   #left-controls {
     position: absolute;
@@ -123,10 +168,47 @@
     pointer-events: auto;
   }
   #speed-controls {
-    display: flex; gap: 4px;
+    display: flex; flex-wrap: wrap; gap: 4px;
+    width: 168px; /* two rows of roughly-equal buttons instead of five
+                     cramped ones in a single row on a narrow screen */
   }
-  #speed-controls .btn { flex: 1; padding: 8px 6px; }
+  #speed-controls .btn { flex: 1 1 30%; padding: 8px 4px; font-size: 11px; }
   #speed-controls .btn.active { background: rgba(51,255,51,0.35); color: var(--green-bright); }
+
+  /* ---------- NavComp popup ---------- */
+  #navcomp-overlay .panel { min-width: 260px; }
+  #navcomp-body { display: flex; flex-direction: column; gap: 12px; }
+  #navcomp-select {
+    font-family: inherit;
+    background: #001400;
+    border: 1px solid var(--green-dim);
+    color: var(--green);
+    padding: 10px 8px;
+    font-size: 13px;
+    width: 100%;
+  }
+  #navcomp-select optgroup { color: var(--green-bright); font-style: normal; }
+  #navcomp-select option { color: var(--green); background: #001400; }
+  #navcomp-status {
+    font-size: 11px;
+    color: var(--green-dim);
+    min-height: 14px;
+    letter-spacing: 0.5px;
+  }
+  #navcomp-status.warn { color: var(--amber); }
+  .navcomp-actions { display: flex; gap: 8px; }
+  .navcomp-actions .btn { flex: 1; }
+  #navcomp-progress {
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: var(--green-bright);
+    display: none;
+    text-align: center;
+    padding: 6px 0;
+    border-top: 1px solid var(--green-dim);
+    margin-top: 4px;
+  }
+  #navcomp-progress.active { display: block; }
 
   /* ---------- Menus ---------- */
   .overlay {
@@ -227,21 +309,49 @@
       <button class="btn small" id="btn-pause">⏸ PAUSE</button>
       <button class="btn small" id="btn-follow-ship">◎ FOLLOW: ON</button>
       <div id="speed-controls">
+        <button class="btn small" data-speed="0.1">0.1x</button>
         <button class="btn small" data-speed="1">1x</button>
         <button class="btn small" data-speed="5">5x</button>
         <button class="btn small" data-speed="10">10x</button>
+        <button class="btn small" data-speed="100">100x</button>
       </div>
     </div>
 
-    <div id="flight-controls">
-      <button class="btn rotate" id="btn-rotate-left" title="Rotate Left">↺</button>
-      <button class="btn rotate" id="btn-rotate-right" title="Rotate Right">↻</button>
-      <button class="btn wide" id="btn-burn" title="Burn">▲ BURN</button>
-      <button class="btn" id="btn-align-prograde" title="Align Prograde">PRO<br>GRADE</button>
-      <button class="btn" id="btn-align-retrograde" title="Align Retrograde">RETRO<br>GRADE</button>
+    <div id="control-panel">
+      <div class="panel-label">CONTROL PANEL</div>
+      <div id="flight-controls">
+        <button class="btn rotate" id="btn-rotate-left" title="Rotate Left">↺</button>
+        <button class="btn rotate" id="btn-rotate-right" title="Rotate Right">↻</button>
+        <button class="btn wide" id="btn-burn" title="Burn">▲ BURN</button>
+        <button class="btn" id="btn-align-prograde" title="Align Prograde">PRO<br>GRADE</button>
+        <button class="btn" id="btn-align-retrograde" title="Align Retrograde">RETRO<br>GRADE</button>
+        <button class="btn navcomp" id="btn-navcomp" title="Navigation Computer">☉ NAVCOMP</button>
+      </div>
+    </div>
+
+    <div id="navcomp-readout">
+      <div class="panel-label">NAVCOMP STATUS</div>
+      <div id="navcomp-readout-body"><span class="idle">STANDBY</span></div>
     </div>
 
     <div id="toast"></div>
+
+    <!-- NavComp popup -->
+    <div class="overlay" id="navcomp-overlay">
+      <div class="panel">
+        <h2>NAVIGATION COMPUTER</h2>
+        <div id="navcomp-body">
+          <select id="navcomp-select"></select>
+          <div id="navcomp-status"></div>
+          <div class="navcomp-actions">
+            <button class="btn primary" id="btn-navcomp-engage">ENGAGE</button>
+            <button class="btn" id="btn-navcomp-cancel">CANCEL</button>
+          </div>
+          <div id="navcomp-progress"></div>
+        </div>
+        <div class="panel-close"><button class="btn" id="btn-close-navcomp">CLOSE</button></div>
+      </div>
+    </div>
 
     <!-- Main menu overlay -->
     <div class="overlay" id="menu-overlay">
@@ -269,6 +379,7 @@
 <script src="save.js"></script>
 <script src="starmap.js"></script>
 <script src="input.js"></script>
+<script src="navcomp.js"></script>
 <script>
 /* =========================================================================
    MAIN.JS (inline) — Boots the game: loads or creates state, wires up
@@ -295,21 +406,58 @@ Input.init(canvas, gameState, () => {}); // camera mutates gameState directly
 // track raw press state here and read it once per frame in the main
 // loop, rather than mutating physics directly from the event handlers —
 // keeps all physics changes flowing through Physics.step() in one place.
+// Position the NavComp readout flush beneath the control panel by
+// measuring its actual rendered height rather than a hardcoded offset —
+// avoids a gap or overlap if the panel's size changes (e.g. different
+// screen width wrapping the flight-controls grid differently).
+function positionNavcompReadout() {
+  const panel = document.getElementById('control-panel');
+  document.documentElement.style.setProperty('--control-panel-height', panel.offsetHeight + 'px');
+}
+window.addEventListener('resize', positionNavcompReadout);
+positionNavcompReadout();
+
 const heldControls = { rotate: 0, thrust: false };
 
+const btnRotateLeft = document.getElementById('btn-rotate-left');
+const btnRotateRight = document.getElementById('btn-rotate-right');
+const btnBurn = document.getElementById('btn-burn');
+
 function bindHold(el, onStart, onEnd) {
-  // Pointer events (not click) so holding actually tracks press/release,
-  // and pointerleave/cancel are covered so a finger sliding off the
-  // button doesn't leave thrust stuck on — a real risk on a touchscreen.
+  // touch-action: manipulation tells the browser this element handles its
+  // own press/hold behavior and it shouldn't intercept the gesture for
+  // its own purposes (long-press callouts, double-tap-to-zoom detection,
+  // etc). Without this, iOS Safari can swallow the touch sequence
+  // mid-gesture on a sustained press and never deliver a clean pointerup
+  // to our own listener — which is exactly the "Burn gets stuck on"
+  // symptom: the button's onStart fires, but its own onEnd never does,
+  // because Safari decided the hold was the start of a different
+  // gesture and stopped delivering pointer events for it.
+  el.style.touchAction = 'manipulation';
   el.addEventListener('pointerdown', (e) => { e.preventDefault(); onStart(); });
   el.addEventListener('pointerup', onEnd);
   el.addEventListener('pointercancel', onEnd);
   el.addEventListener('pointerleave', onEnd);
 }
 
-const btnRotateLeft = document.getElementById('btn-rotate-left');
-const btnRotateRight = document.getElementById('btn-rotate-right');
-const btnBurn = document.getElementById('btn-burn');
+// Belt-and-suspenders: if a held control's release event is ever missed
+// for any reason (a stray browser gesture swallowing it, a finger
+// lifting off-screen, etc), a global pointerup/pointercancel anywhere in
+// the document forces every held control off. This can never incorrectly
+// cancel a burn that's still actually being held, since a genuine held
+// touch keeps firing pointerdown/no pointerup on THAT element — it only
+// ever catches the case where a release happened somewhere and our
+// specific listener missed it.
+function forceReleaseHeldControls() {
+  if (heldControls.thrust) { heldControls.thrust = false; btnBurn.classList.remove('active'); }
+  if (heldControls.rotate !== 0) {
+    heldControls.rotate = 0;
+    btnRotateLeft.classList.remove('active');
+    btnRotateRight.classList.remove('active');
+  }
+}
+document.addEventListener('pointerup', forceReleaseHeldControls);
+document.addEventListener('pointercancel', forceReleaseHeldControls);
 
 bindHold(btnRotateLeft,
   () => { heldControls.rotate = -1; btnRotateLeft.classList.add('active'); },
@@ -339,6 +487,228 @@ function setAlignTarget(target) {
 btnAlignPro.addEventListener('click', () => setAlignTarget('prograde'));
 btnAlignRetro.addEventListener('click', () => setAlignTarget('retrograde'));
 
+// ---- NavComp: pick a body, engage an automated transfer, and let the
+// autopilot fly it. While gameState.player.ship.autopilot is set, the
+// main loop (below) drives Autopilot.driveFrame instead of the normal
+// manual Physics.step(heldControls) path, and manual flight controls are
+// disabled so the player can't fight the autopilot mid-burn.
+const navcompOverlay = document.getElementById('navcomp-overlay');
+const navcompSelect = document.getElementById('navcomp-select');
+const navcompStatus = document.getElementById('navcomp-status');
+const navcompProgress = document.getElementById('navcomp-progress');
+const btnNavcomp = document.getElementById('btn-navcomp');
+const btnNavcompEngage = document.getElementById('btn-navcomp-engage');
+const btnNavcompCancel = document.getElementById('btn-navcomp-cancel');
+
+// Friendly labels for the autopilot's internal stage names, shown while
+// a transfer is in progress so the player has some sense of what's
+// happening during a long unattended burn/coast sequence.
+const NAVCOMP_STAGE_LABELS = {
+  ESCAPE_BURN: 'ESCAPING CURRENT ORBIT',
+  RAISE_ORBIT: 'ADJUSTING ORBIT',
+  COAST_TO_RADIUS: 'COASTING TO TARGET RANGE',
+  MATCH_ANGLE: 'PHASING FOR RENDEZVOUS',
+  CAPTURE_BURN: 'CAPTURE BURN',
+};
+
+// Friendly sub-labels for MATCH_ANGLE's internal sub-phases, shown as
+// extra context since "PHASING FOR RENDEZVOUS" alone can look identical
+// for a long stretch while the ship cycles through several small burns
+// and waits under the hood.
+const NAVCOMP_MATCH_ANGLE_SUBPHASE_LABELS = {
+  CHECK_GAP: 'CHECKING ALIGNMENT',
+  PHASE_BURN: 'BURNING TO PHASING ORBIT',
+  PHASE_COAST: 'COASTING TO PHASING ORBIT',
+  PHASE_CIRCULARIZE: 'CIRCULARIZING',
+  WAITING: 'WAITING FOR ALIGNMENT',
+  RETURN_BURN: 'RETURNING TO TARGET RANGE',
+  RETURN_COAST: 'RETURNING TO TARGET RANGE',
+  RETURN_CIRCULARIZE: 'CIRCULARIZING',
+};
+
+function populateNavcompOptions() {
+  const system = getCurrentSystem(gameState);
+  const bodies = NavComp.listNavigableBodies(system, gameState.player.ship);
+  // Only planets and star-orbiting stations/asteroids are valid NavComp
+  // targets per current scope (see Autopilot.createPlan) — moons are
+  // reached by first achieving orbit around their host planet, so they
+  // are intentionally left off this list rather than offered and then
+  // rejected after the player picks one.
+  const validKinds = new Set([BodyKind.PLANET, BodyKind.STATION, BodyKind.ASTEROID]);
+  const groups = { PLANET: [], STATION: [], ASTEROID: [] };
+  bodies.forEach(b => {
+    if (!validKinds.has(b.kind)) return;
+    if (b.isCurrent) return; // can't navigate to where the ship already is
+    // Stations/asteroids orbiting a PLANET (not the star) are also out
+    // of scope for the same reason moons are — only direct-solar-orbit
+    // targets are offered here.
+    if (b.kind !== BodyKind.PLANET && b.parentName && b.parentName.toLowerCase() !== 'sol'
+        && !system.bodies.find(sb => sb.id === b.parentId && sb.kind === BodyKind.STAR)) {
+      return;
+    }
+    (groups[b.kind] || groups.PLANET).push(b);
+  });
+
+  navcompSelect.innerHTML = '';
+  const groupLabels = { PLANET: 'Planets', STATION: 'Stations', ASTEROID: 'Asteroids' };
+  Object.keys(groups).forEach(kind => {
+    if (groups[kind].length === 0) return;
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = groupLabels[kind] || kind;
+    groups[kind].forEach(b => {
+      const opt = document.createElement('option');
+      opt.value = b.id;
+      opt.textContent = b.name;
+      optgroup.appendChild(opt);
+    });
+    navcompSelect.appendChild(optgroup);
+  });
+
+  if (navcompSelect.options.length === 0) {
+    navcompStatus.textContent = 'NO VALID DESTINATIONS';
+    navcompStatus.classList.add('warn');
+    btnNavcompEngage.disabled = true;
+  } else {
+    navcompStatus.textContent = '';
+    navcompStatus.classList.remove('warn');
+    btnNavcompEngage.disabled = false;
+  }
+}
+
+function openNavcomp() {
+  const ship = gameState.player.ship;
+  if (ship.autopilot) {
+    // Reopening while already engaged shows progress instead of the
+    // picker — and critically, does NOT rebuild/reset the dropdown,
+    // since doing so unconditionally here was the actual bug behind
+    // NavComp appearing to "forget" the chosen target and show Aldrin
+    // instead: populateNavcompOptions() rebuilds the <select> from
+    // scratch every time, and a freshly rebuilt dropdown defaults to
+    // whichever option happens to be first in the list — completely
+    // disconnected from what the active plan is actually flying to.
+    // The persistent status readout (see updateNavcompReadout) is now
+    // the source of truth for "what is NavComp doing," driven directly
+    // from ship.autopilot.targetBodyId rather than the dropdown's
+    // incidental selected value.
+    navcompProgress.classList.add('active');
+    navcompSelect.disabled = true;
+    btnNavcompEngage.style.display = 'none';
+  } else {
+    populateNavcompOptions();
+    navcompProgress.classList.remove('active');
+    navcompSelect.disabled = false;
+    btnNavcompEngage.style.display = '';
+  }
+  navcompOverlay.classList.add('visible');
+  updateNavcompProgress(); // refresh immediately, don't wait for next frame
+}
+btnNavcomp.addEventListener('click', openNavcomp);
+document.getElementById('btn-close-navcomp').addEventListener('click', () => {
+  navcompOverlay.classList.remove('visible');
+});
+
+btnNavcompEngage.addEventListener('click', () => {
+  const targetId = navcompSelect.value;
+  if (!targetId) return;
+  const system = getCurrentSystem(gameState);
+  const plan = Autopilot.createPlan(system, gameState.player.ship, targetId);
+  if (!plan) {
+    navcompStatus.textContent = 'NO VALID TRAJECTORY';
+    navcompStatus.classList.add('warn');
+    return;
+  }
+  // Engaging hands full control to the autopilot: clear any manual
+  // align target and held-button state so nothing fights the computer,
+  // and disable the flight-control buttons for the duration.
+  gameState.player.ship.alignTarget = null;
+  heldControls.rotate = 0;
+  heldControls.thrust = false;
+  btnRotateLeft.classList.remove('active');
+  btnRotateRight.classList.remove('active');
+  btnBurn.classList.remove('active');
+  setFlightControlsEnabled(false);
+  gameState.player.ship.autopilot = plan;
+  navcompSelect.disabled = true;
+  btnNavcompEngage.style.display = 'none';
+  navcompProgress.classList.add('active');
+  showToast('NAVCOMP ENGAGED');
+  navcompOverlay.classList.remove('visible');
+  updateNavcompProgress(); // refresh immediately, don't wait for next frame
+});
+
+btnNavcompCancel.addEventListener('click', () => {
+  if (gameState.player.ship.autopilot) {
+    gameState.player.ship.autopilot = null;
+    gameState.player.ship.alignTarget = null;
+    setFlightControlsEnabled(true);
+    showToast('NAVCOMP DISENGAGED');
+  }
+  navcompOverlay.classList.remove('visible');
+  updateNavcompProgress();
+});
+
+function setFlightControlsEnabled(enabled) {
+  [btnRotateLeft, btnRotateRight, btnBurn, btnAlignPro, btnAlignRetro].forEach(btn => {
+    btn.disabled = !enabled;
+    btn.style.opacity = enabled ? '' : '0.35';
+  });
+}
+
+// Always-visible NavComp status readout, shown under the control panel
+// regardless of whether the popup is open — this is the authoritative
+// "what is NavComp doing right now" display, driven directly from
+// ship.autopilot itself (never from the dropdown's selected value, which
+// is only meaningful while the player is actively choosing a NEW target
+// and gets rebuilt/reset independently — see openNavcomp's comment).
+const navcompReadoutBody = document.getElementById('navcomp-readout-body');
+
+function formatNavcompReadout(state) {
+  const ship = state.player.ship;
+  const plan = ship.autopilot;
+  if (!plan) return '<span class="idle">STANDBY</span>';
+
+  const system = getCurrentSystem(state);
+  const targetBody = Physics.findBody(system, plan.targetBodyId);
+  const targetName = targetBody ? targetBody.name.toUpperCase() : plan.targetBodyId.toUpperCase();
+  const stageLabel = NAVCOMP_STAGE_LABELS[plan.stage] || plan.stage;
+
+  const lines = [];
+  lines.push(`<span class="label">TARGET</span> <span class="value">${targetName}</span>`);
+  lines.push(`<span class="label">STAGE</span> <span class="value">${stageLabel}</span>`);
+
+  // A little extra context per stage, since a stage name alone can look
+  // identical for a long stretch — showing burn progress, range, or
+  // eccentricity makes it clear NavComp is still actively working.
+  if ((plan.stage === 'RAISE_ORBIT') && plan.hohmann) {
+    const pct = Math.min(100, (plan.dvApplied / Math.abs(plan.hohmann.dv1)) * 100);
+    lines.push(`<span class="label">BURN</span> <span class="value">${pct.toFixed(0)}%</span>`);
+  } else if (plan.stage === 'COAST_TO_RADIUS' && plan.hohmann) {
+    const positions = Physics.allWorldPositions(system);
+    const lca = Physics.findBody(system, plan.lcaId);
+    const lcaPos = positions.get(lca.id);
+    const dist = Math.hypot(ship.x - lcaPos.x, ship.y - lcaPos.y);
+    lines.push(`<span class="label">RANGE</span> <span class="value">${dist.toFixed(0)} / ${plan.hohmann.r2.toFixed(0)}</span>`);
+  } else if (plan.stage === 'MATCH_ANGLE') {
+    const subLabel = NAVCOMP_MATCH_ANGLE_SUBPHASE_LABELS[plan.matchAnglePhase] || plan.matchAnglePhase || '—';
+    lines.push(`<span class="label">STEP</span> <span class="value">${subLabel}</span>`);
+  } else if (plan.stage === 'CAPTURE_BURN') {
+    const els = Physics.orbitalElements(system, ship);
+    lines.push(`<span class="label">ECC.</span> <span class="value">${els ? els.e.toFixed(3) : '—'}</span>`);
+  }
+
+  return lines.join('\n');
+}
+
+function updateNavcompProgress() {
+  const ship = gameState.player.ship;
+  if (ship.autopilot && navcompProgress.classList.contains('active')) {
+    const label = NAVCOMP_STAGE_LABELS[ship.autopilot.stage] || ship.autopilot.stage;
+    navcompProgress.textContent = label;
+  }
+  navcompReadoutBody.innerHTML = formatNavcompReadout(gameState);
+}
+
+
 // ---- Pause ----
 const btnPause = document.getElementById('btn-pause');
 btnPause.addEventListener('click', () => {
@@ -346,11 +716,11 @@ btnPause.addEventListener('click', () => {
   btnPause.textContent = gameState.time.paused ? '▶ RESUME' : '⏸ PAUSE';
 });
 
-// ---- Speed (1x/5x/10x) ----
-// A modest, capped range rather than the old wide warp scale: attitude
-// flying (rotate/burn/align) needs to stay controllable, and 10x is
-// already fast enough to skip through a long coast without making burns
-// impossible to time.
+// ---- Speed (0.1x/1x/5x/10x/100x) ----
+// A capped range rather than the old wide warp scale: attitude flying
+// (rotate/burn/align) needs to stay controllable. 0.1x gives fine
+// control for a tricky final approach or docking-style maneuver; 100x
+// is fast enough to skip through a long interplanetary coast.
 const speedButtons = document.querySelectorAll('[data-speed]');
 function setSpeedButtonsActive(scale) {
   speedButtons.forEach(btn => btn.classList.toggle('active', Number(btn.dataset.speed) === scale));
@@ -392,6 +762,12 @@ function syncControlButtonsToState() {
   btnRotateLeft.classList.remove('active');
   btnRotateRight.classList.remove('active');
   btnBurn.classList.remove('active');
+  // A load/new-game/reset can land mid-transfer (a saved autopilot plan)
+  // or with none — sync the flight-control enable state and progress
+  // display to match whatever came in, rather than assuming neither.
+  setFlightControlsEnabled(!gameState.player.ship.autopilot);
+  navcompProgress.classList.toggle('active', !!gameState.player.ship.autopilot);
+  navcompOverlay.classList.remove('visible');
 }
 
 document.getElementById('btn-save').onclick = () => {
@@ -509,7 +885,22 @@ function loop(now) {
   const realDt = Math.min(0.1, (now - lastTime) / 1000); // clamp for tab-switch stalls
   lastTime = now;
 
-  Physics.step(gameState, realDt, heldControls);
+  const ship = gameState.player.ship;
+  if (ship.autopilot) {
+    const stillGoing = Autopilot.driveFrame(gameState, ship.autopilot, realDt);
+    if (!stillGoing) {
+      ship.autopilot = null;
+      ship.alignTarget = null;
+      setFlightControlsEnabled(true);
+      navcompProgress.classList.remove('active');
+      showToast('NAVCOMP: ARRIVED');
+    }
+  } else {
+    Physics.step(gameState, realDt, heldControls);
+  }
+  updateNavcompProgress(); // every frame, regardless of autopilot state,
+                            // so the readout correctly shows STANDBY when
+                            // idle and updates live numbers while active.
   StarMap.draw(gameState);
   updateHud();
 

@@ -159,11 +159,36 @@ const StarMap = (() => {
     const duration = (els && els.closed) ? els.period * 1.02 : 3000;
     const pts = Physics.predictTrajectory(system, ship, duration, 240);
 
+    // Re-anchor each point to its dominant body's CURRENT (live) world
+    // position, rather than drawing the raw absolute (x,y) the
+    // prediction returned. For an orbit around a moving body (any
+    // planet or moon, which all continuously orbit their own parent),
+    // the ship's ABSOLUTE path spirals through space along with that
+    // body's motion — plotting it directly does not look like a closed
+    // ellipse even though the underlying orbit is physically correct
+    // and stable. Using each point's precomputed offset from ITS
+    // dominant body at prediction time (relX/relY), then adding that
+    // offset onto the body's position NOW, draws an ellipse that stays
+    // visually centered on wherever the planet/moon/star currently is —
+    // exactly the "orbit indicator redraws around the planet you're
+    // orbiting" behavior. A point's own dominant body can occasionally
+    // differ from the CURRENT ship's dominant body (e.g. right at an
+    // escape boundary); each point re-anchors to its own recorded body
+    // rather than forcing all points onto one, so the line stays
+    // sensible through a transition instead of snapping awkwardly.
+    const positions = Physics.allWorldPositions(system);
+    const anchoredPts = pts.map(pt => {
+      if (!pt.bodyId) return { x: pt.x, y: pt.y }; // no dominant body (shouldn't normally happen); fall back to absolute
+      const bodyPos = positions.get(pt.bodyId);
+      if (!bodyPos) return { x: pt.x, y: pt.y }; // body id from a stale/different system state; fail safe to absolute
+      return { x: bodyPos.x + pt.relX, y: bodyPos.y + pt.relY };
+    });
+
     ctx.beginPath();
     ctx.strokeStyle = 'rgba(255,255,255,0.5)';
     ctx.setLineDash([2, 4]);
     ctx.lineWidth = 1;
-    pts.forEach((pt, i) => {
+    anchoredPts.forEach((pt, i) => {
       const p = project(camera, pt.x, pt.y);
       if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
     });
@@ -173,6 +198,9 @@ const StarMap = (() => {
     // Mark apoapsis (highest point) and periapsis (lowest point) directly
     // on the projected orbit line, so a prograde/retrograde burn's effect
     // ("apoapsis just rose") is visible on the map, not just in the HUD.
+    // These already come from orbitalElements using the ship's CURRENT
+    // dominant body and that body's CURRENT position, so no re-anchoring
+    // is needed here — only the multi-point predicted path drifts.
     if (els && els.closed) {
       drawOrbitMarker(camera, els.apoapsis, 'AP', '#ffb000');
       drawOrbitMarker(camera, els.periapsis, 'PE', '#66ccff');

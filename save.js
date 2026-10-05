@@ -12,7 +12,7 @@
 
 const SaveSystem = (() => {
   const STORAGE_KEY = 'spacesim.save.v1';
-  const CURRENT_VERSION = 3;
+  const CURRENT_VERSION = 4;
 
   function save(state) {
     state.meta.savedAt = Date.now();
@@ -84,6 +84,16 @@ const SaveSystem = (() => {
         ship.fuelMax = 1000;
       }
       v = 3;
+    }
+
+    if (v < 4) {
+      // Added NavComp autopilot (ship.autopilot). Old saves have no such
+      // field — default to null (flying manually), never mid-transfer.
+      const ship = state.player && state.player.ship;
+      if (ship && typeof ship.autopilot === 'undefined') {
+        ship.autopilot = null;
+      }
+      v = 4;
     }
 
     state.meta.version = CURRENT_VERSION;

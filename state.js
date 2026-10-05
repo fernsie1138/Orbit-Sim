@@ -187,11 +187,26 @@ function createNewGameState() {
   // distorts the force law at exactly the scale of its orbit.
   const shipRelSpeed = Math.sqrt(aldrin.mu / startOrbitR);
 
-  // Place the ship "above" Aldrin (local +y) moving in +x relative to
-  // Aldrin, i.e. a clean perpendicular circular orbit in the local frame.
+  // Place the ship "above" Aldrin (local +y) moving in -x relative to
+  // Aldrin. This gives COUNTERCLOCKWISE motion (positive angular
+  // momentum: x*vy - y*vx = 0*0 - r*(-v) = +r*v), matching the direction
+  // every planet, moon, and station in this system orbits — set by
+  // makeBody's angular-velocity derivation and circularVelocityAt's
+  // "+90 degrees" tangential convention elsewhere in the codebase. The
+  // ship previously moved in +x here, which gives CLOCKWISE motion —
+  // opposite every other body. That mismatch was invisible to plain
+  // stability testing (which only checks orbital RADIUS over time, not
+  // rotational direction) but silently broke phase-angle-based
+  // rendezvous math the moment the navigation computer needed to
+  // reason about "does the ship catch up to the target, or fall behind"
+  // — found by tracing a Hohmann transfer's wait-time calculation that
+  // was computing a phase that INCREASED over time when the formula
+  // (correctly, for two same-direction orbits) expected it to decrease,
+  // which traced back to the ship orbiting backwards relative to
+  // everything else in the system.
   const shipX = aldrinPos.x;
   const shipY = aldrinPos.y + startOrbitR;
-  const shipVx = aldrinVel.vx + shipRelSpeed;
+  const shipVx = aldrinVel.vx - shipRelSpeed;
   const shipVy = aldrinVel.vy;
 
   return {
@@ -228,6 +243,11 @@ function createNewGameState() {
                              // the ship rotates itself toward that facing
                              // each frame instead of drifting freely;
                              // any manual rotation input cancels it.
+        autopilot: null,    // NavComp transfer plan object, or null when
+                             // flying manually — see navcomp.js. Persisted
+                             // through save/load so a save mid-transfer
+                             // resumes the autopilot rather than stranding
+                             // the ship or silently cancelling the plan.
         referenceBodyId: 'aldrin', // for display purposes ("orbiting Aldrin")
         fuel: 1000,
         fuelMax: 1000,
