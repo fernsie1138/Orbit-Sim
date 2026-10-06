@@ -302,7 +302,7 @@
       <div class="stat-row" style="margin-top: 6px;"><span class="stat-label">FUEL</span><div class="bar"><div class="bar-fill" id="bar-fuel"></div></div><span class="stat-readout" id="readout-fuel">—/—</span></div>
       <div class="stat-row"><span class="stat-label">OXYGEN</span><div class="bar"><div class="bar-fill" id="bar-oxygen"></div></div><span class="stat-readout" id="readout-oxygen">—/—</span></div>
       <div class="stat-row"><span class="stat-label">SUPPLY</span><div class="bar"><div class="bar-fill" id="bar-supplies"></div></div><span class="stat-readout" id="readout-supplies">—/—</span></div>
-      <div class="stat-row"><span class="stat-label">HULL</span><div class="bar"><div class="bar-fill" id="bar-hull"></div></div><span class="stat-readout" id="readout-hull">—/—</span></div>
+      <button class="btn small" id="btn-engineering" style="margin-top: 6px; width: 100%; pointer-events: auto;">⚙ ENGINEERING</button>
       <div id="hud-credits" style="margin-top: 6px; color: var(--green-bright);">CREDITS: —</div>
     </div>
 
@@ -310,7 +310,7 @@
       <button class="btn small" id="menu-btn">≡ MENU</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 3</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 4</div>
     </div>
 
     <div id="left-controls">
@@ -395,6 +395,17 @@
         <div id="market-credits" style="margin-bottom:10px;font-size:13px;color:var(--green-bright);">CREDITS: 10,000</div>
         <div id="market-body"></div>
         <div class="panel-close"><button class="btn" id="btn-close-market">CLOSE</button></div>
+      </div>
+    </div>
+
+    <!-- Engineering: condition readout for the ship's five core systems
+         (engine, reactor, hull, nav, cooler — see Physics.
+         applyEngineeringWear). Replaces the old standalone hull bar. -->
+    <div class="overlay" id="engineering-overlay">
+      <div class="panel codex-panel">
+        <h2>ENGINEERING</h2>
+        <div id="engineering-body"></div>
+        <div class="panel-close"><button class="btn" id="btn-close-engineering">CLOSE</button></div>
       </div>
     </div>
 
@@ -837,6 +848,43 @@ document.getElementById('btn-close-market').addEventListener('click', () => {
   document.getElementById('market-overlay').classList.remove('visible');
 });
 
+// ---- Engineering (five-system condition readout, replacing the old
+// standalone hull bar) ----
+// Order/labels roughly follow the reference diagram's layout (NAV up
+// top, REACTOR central, HULL alongside it, ENGINE/COOLER at the base) —
+// shown here as a simple labeled list rather than literal triangle
+// artwork, consistent with how every other info screen in this game
+// (Codex, Market) presents as a plain panel rather than custom graphics.
+const ENGINEERING_LABELS = { nav: 'NAV', reactor: 'REACTOR', hull: 'HULL', engine: 'ENGINE', cooler: 'COOLER' };
+const ENGINEERING_ORDER = ['nav', 'reactor', 'hull', 'engine', 'cooler'];
+
+function renderEngineering() {
+  const ship = gameState.player.ship;
+  let html = '';
+  ENGINEERING_ORDER.forEach(key => {
+    const current = ship[key];
+    const max = ship[key + 'Max'];
+    const pct = Math.max(0, Math.min(100, (current / max) * 100));
+    let barClass = '';
+    if (pct < 15) barClass = 'crit';
+    else if (pct < 40) barClass = 'warn';
+    html += `<div class="stat-row" style="margin-bottom: 10px;">
+      <span class="stat-label" style="width: 80px;">${ENGINEERING_LABELS[key]}</span>
+      <div class="bar"><div class="bar-fill ${barClass}" style="width: ${pct}%;"></div></div>
+      <span class="stat-readout">${Math.round(current)}/${Math.round(max)}</span>
+    </div>`;
+  });
+  document.getElementById('engineering-body').innerHTML = html;
+}
+
+document.getElementById('btn-engineering').addEventListener('click', () => {
+  renderEngineering();
+  document.getElementById('engineering-overlay').classList.add('visible');
+});
+document.getElementById('btn-close-engineering').addEventListener('click', () => {
+  document.getElementById('engineering-overlay').classList.remove('visible');
+});
+
 // Whenever gameState is replaced wholesale (load/new game/import), the
 // control buttons need to resync their visual state to match — otherwise
 // e.g. the pause button could still say "RESUME" after loading a save
@@ -972,14 +1020,19 @@ function updateHud() {
   setBar('bar-fuel', (ship.fuel / ship.fuelMax) * 100);
   setBar('bar-oxygen', (ship.oxygen / ship.oxygenMax) * 100);
   setBar('bar-supplies', (ship.supplies / ship.suppliesMax) * 100);
-  setBar('bar-hull', (ship.hull / ship.hullMax) * 100);
 
   setReadout('readout-fuel', ship.fuel, ship.fuelMax);
   setReadout('readout-oxygen', ship.oxygen, ship.oxygenMax);
   setReadout('readout-supplies', ship.supplies, ship.suppliesMax);
-  setReadout('readout-hull', ship.hull, ship.hullMax);
 
   document.getElementById('hud-credits').textContent = `CREDITS: ${formatCredits(gameState.player.credits)}`;
+
+  // Engineering overlay, if currently open, refreshes live too — wear
+  // happens continuously, so a system status open while flying should
+  // visibly tick down rather than only updating the moment it's reopened.
+  if (document.getElementById('engineering-overlay').classList.contains('visible')) {
+    renderEngineering();
+  }
 }
 
 function setReadout(id, current, max) {

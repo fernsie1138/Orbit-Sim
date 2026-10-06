@@ -20,7 +20,7 @@ const SaveSystem = (() => {
                                                 // isn't silently lost, not
                                                 // because the old name means
                                                 // anything going forward.
-  const CURRENT_VERSION = 9;
+  const CURRENT_VERSION = 10;
 
   function save(state) {
     state.meta.savedAt = Date.now();
@@ -176,6 +176,22 @@ const SaveSystem = (() => {
         player.credits = 10000;
       }
       v = 9;
+    }
+
+    if (v < 10) {
+      // Added four more Engineering systems alongside hull (engine,
+      // reactor, nav, cooler — see the ENGINEERING screen). Old saves
+      // only have hull/hullMax — default the new ones to full (100),
+      // same as a fresh ship, since there's no way to know what an
+      // existing save's equipment "should" already have accumulated.
+      const ship = state.player && state.player.ship;
+      if (ship && typeof ship.engine === 'undefined') {
+        ship.engine = 100; ship.engineMax = 100;
+        ship.reactor = 100; ship.reactorMax = 100;
+        ship.nav = 100; ship.navMax = 100;
+        ship.cooler = 100; ship.coolerMax = 100;
+      }
+      v = 10;
     }
 
     state.meta.version = CURRENT_VERSION;

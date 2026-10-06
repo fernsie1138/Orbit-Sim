@@ -372,8 +372,21 @@ function createNewGameState() {
         oxygenMax: 100,
         supplies: 100,
         suppliesMax: 100,
+        // Engineering systems: hull plus four more, each 1-100 (never 0 —
+        // these represent wear/condition, not a consumable that can run
+        // fully out) — see Physics.applyEngineeringWear for how they
+        // degrade, and the ENGINEERING screen (replacing the old simple
+        // hull bar) in index.html for how they're shown.
         hull: 100,
         hullMax: 100,
+        engine: 100,
+        engineMax: 100,
+        reactor: 100,
+        reactorMax: 100,
+        nav: 100,
+        navMax: 100,
+        cooler: 100,
+        coolerMax: 100,
         name: 'Wanderer',
       },
     },

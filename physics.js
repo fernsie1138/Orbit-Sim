@@ -398,28 +398,62 @@ const Physics = (() => {
                                    // afterthought).
 
   // Passive life-support drain: unlike fuel (which only depletes while
-  // actively thrusting), oxygen/supplies/hull tick down continuously with
+  // actively thrusting), oxygen/supplies tick down continuously with
   // elapsed SIM time (so they scale with time-warp exactly like
   // everything else — 10 minutes of travel compressed into 6 real
   // seconds at 100x still costs the crew 10 minutes' worth of air and
   // food, not an artificially-preserved amount just because the player
-  // fast-forwarded). Oxygen/supplies were originally tuned faster, but
-  // that ran them out too quickly in practice, so both are now at 10% of
-  // their original rate — still a real concern over a long session, just
-  // not an urgent one minute-to-minute. Hull wear is unchanged, and
-  // remains the slowest of the three — still visibly ticking down if you
-  // watch it, but not an urgent problem the way fuel/oxygen are meant to
-  // be. All three clamp at 0 like fuel already does; there's no
-  // additional failure-state behavior yet (no crew/hull-loss consequence
-  // system exists).
+  // fast-forwarded). Both were originally tuned faster, but that ran
+  // them out too quickly in practice, so both are now at 10% of their
+  // original rate — still a real concern over a long session, just not
+  // an urgent one minute-to-minute. Clamp at 0 — there's no additional
+  // failure-state behavior yet (no crew-loss consequence system exists).
+  //
+  // Hull used to drain here too, deterministically, as a standalone
+  // stat — it's now one of five Engineering systems (see
+  // applyEngineeringWear below) and no longer wears down this way.
   const OXYGEN_DEPLETION_RATE = 0.015;   // units/sec of sim time (max 100 -> ~111 min to empty)
   const SUPPLIES_DEPLETION_RATE = 0.008; // units/sec of sim time (max 100 -> ~208 min to empty)
-  const HULL_DEPLETION_RATE = 0.02;      // units/sec of sim time (max 100 -> ~83 min to empty)
 
   function applyLifeSupportDrain(ship, dt) {
     ship.oxygen = Math.max(0, ship.oxygen - OXYGEN_DEPLETION_RATE * dt);
     ship.supplies = Math.max(0, ship.supplies - SUPPLIES_DEPLETION_RATE * dt);
-    ship.hull = Math.max(0, ship.hull - HULL_DEPLETION_RATE * dt);
+  }
+
+  // Engineering wear: the five ship systems (engine, reactor, hull, nav,
+  // cooler — see the ENGINEERING screen, which replaced the old simple
+  // hull bar) degrade randomly and slowly over a journey, rather than a
+  // smooth, predictable drain — occasional small wear events, each
+  // landing on ONE randomly chosen system. The combined expected wear
+  // rate across all five averages to 10% of the old hull-only rate
+  // (0.02/sec), genuinely minor: roughly one small wear event every
+  // ~15-20 minutes of sim time on average, not something that demands
+  // constant attention.
+  //
+  // Uses an EXPECTED-VALUE approach (guaranteed whole events, plus one
+  // probabilistic check for the fractional remainder) rather than a
+  // simple per-frame dice roll, specifically so this behaves correctly
+  // regardless of how much sim-time a single frame covers — at 1x a
+  // frame is a tiny fraction of a second (expectedEvents usually near
+  // 0, only occasionally firing), but at 100x warp a single frame can
+  // cover several real seconds of sim time, where a naive "roll once
+  // per frame regardless of dt" approach would under-count how many
+  // wear events should actually have happened. This keeps the LONG-RUN
+  // AVERAGE rate correct at any warp speed, the same principle already
+  // used for the game's time-warp-aware consumable drains.
+  const ENGINEERING_WEAR_EVENT_RATE = 0.001; // events/sec of sim time
+  const ENGINEERING_SYSTEMS = ['engine', 'reactor', 'hull', 'nav', 'cooler'];
+
+  function applyEngineeringWear(ship, dt) {
+    const expectedEvents = ENGINEERING_WEAR_EVENT_RATE * dt;
+    let events = Math.floor(expectedEvents);
+    const remainder = expectedEvents - events;
+    if (Math.random() < remainder) events += 1;
+    for (let i = 0; i < events; i++) {
+      const system = ENGINEERING_SYSTEMS[Math.floor(Math.random() * ENGINEERING_SYSTEMS.length)];
+      const wearAmount = 1 + Math.random() * 2; // 1-3 points, averaging ~2 (so eventRate*2 ≈ 0.002/sec combined, matching 10% of the old 0.02/sec hull rate)
+      ship[system] = Math.max(1, ship[system] - wearAmount); // floor at 1, never fully 0 — see state.js: these represent wear/condition, not a consumable that runs out
+    }
   }
 
   // Advance the ship's heading (facing angle) by dt seconds, given a
@@ -610,10 +644,11 @@ const Physics = (() => {
       stepShip(system, ship, dt);
     }
 
-    applyLifeSupportDrain(ship, dt); // oxygen/supplies/hull tick down
-                                       // regardless of flight state —
-                                       // life support and ship wear don't
-                                       // pause just because you're landed.
+    applyLifeSupportDrain(ship, dt);  // oxygen/supplies tick down
+    applyEngineeringWear(ship, dt);   // engine/reactor/hull/nav/cooler wear randomly
+                                       // — both regardless of flight state: life
+                                       // support and ship wear don't pause just
+                                       // because you're landed.
 
     state.time.simSeconds += dt;
     state.meta.playTimeSeconds += realSeconds;
@@ -920,5 +955,6 @@ const Physics = (() => {
     nearestBody, predictTrajectory, orbitalElements, THRUST_ACCEL, bodyWorldVelocityAt,
     applySoftCapture, CAPTURE_SPEED_FRACTION,
     landingRangeFor, findLandableBody, land, launch,
+    ENGINEERING_SYSTEMS, applyEngineeringWear,
   };
 })();
