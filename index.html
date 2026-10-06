@@ -58,6 +58,7 @@
   #hud-top-right { top: 0; right: 0; text-align: right; }
 
   .stat-row { display: flex; gap: 8px; align-items: center; white-space: nowrap; }
+  .stat-readout { font-size: 10px; color: var(--green-dim); min-width: 62px; }
   .stat-label { width: 66px; display: inline-block; opacity: 0.85; }
   .bar {
     width: 90px; height: 8px;
@@ -298,17 +299,18 @@
       <div id="hud-refbody">TRACKING: —</div>
       <div id="hud-speed">V: 0.00 km/s</div>
       <div id="hud-orbit">AP: — PE: —</div>
-      <div class="stat-row" style="margin-top: 6px;"><span class="stat-label">FUEL</span><div class="bar"><div class="bar-fill" id="bar-fuel"></div></div></div>
-      <div class="stat-row"><span class="stat-label">OXYGEN</span><div class="bar"><div class="bar-fill" id="bar-oxygen"></div></div></div>
-      <div class="stat-row"><span class="stat-label">SUPPLY</span><div class="bar"><div class="bar-fill" id="bar-supplies"></div></div></div>
-      <div class="stat-row"><span class="stat-label">HULL</span><div class="bar"><div class="bar-fill" id="bar-hull"></div></div></div>
+      <div class="stat-row" style="margin-top: 6px;"><span class="stat-label">FUEL</span><div class="bar"><div class="bar-fill" id="bar-fuel"></div></div><span class="stat-readout" id="readout-fuel">—/—</span></div>
+      <div class="stat-row"><span class="stat-label">OXYGEN</span><div class="bar"><div class="bar-fill" id="bar-oxygen"></div></div><span class="stat-readout" id="readout-oxygen">—/—</span></div>
+      <div class="stat-row"><span class="stat-label">SUPPLY</span><div class="bar"><div class="bar-fill" id="bar-supplies"></div></div><span class="stat-readout" id="readout-supplies">—/—</span></div>
+      <div class="stat-row"><span class="stat-label">HULL</span><div class="bar"><div class="bar-fill" id="bar-hull"></div></div><span class="stat-readout" id="readout-hull">—/—</span></div>
+      <div id="hud-credits" style="margin-top: 6px; color: var(--green-bright);">CREDITS: —</div>
     </div>
 
     <div class="hud-corner" id="hud-top-right">
       <button class="btn small" id="menu-btn">≡ MENU</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 2</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 3</div>
     </div>
 
     <div id="left-controls">
@@ -332,6 +334,7 @@
         <button class="btn" id="btn-align-prograde" title="Align Prograde">PRO<br>GRADE</button>
         <button class="btn" id="btn-align-retrograde" title="Align Retrograde">RETRO<br>GRADE</button>
         <button class="btn wide" id="btn-land-launch" title="Land / Launch" disabled>LAND</button>
+        <button class="btn wide" id="btn-market" title="Market" disabled>MARKET</button>
       </div>
     </div>
 
@@ -342,6 +345,7 @@
       <div class="panel">
         <h2>WANDERER CONSOLE</h2>
         <div class="row">
+          <button class="btn" id="btn-pilot">🧑‍🚀 PILOT</button>
           <button class="btn" id="btn-codex">📖 CODEX</button>
           <button class="btn primary" id="btn-save">SAVE GAME</button>
           <button class="btn" id="btn-load">LOAD GAME</button>
@@ -367,6 +371,33 @@
       </div>
     </div>
 
+    <!-- Pilot readout: editable name + credits balance. -->
+    <div class="overlay" id="pilot-overlay">
+      <div class="panel">
+        <h2>PILOT</h2>
+        <div class="row">
+          <div class="codex-field-label">NAME</div>
+          <input type="text" id="pilot-name-input" maxlength="24" style="font-family:inherit;background:#001400;border:1px solid var(--green-dim);color:var(--green);padding:10px 8px;font-size:14px;width:100%;">
+          <div class="codex-field-label" style="margin-top:10px;">CREDITS</div>
+          <div id="pilot-credits" style="font-size:20px;color:var(--green-bright);letter-spacing:1px;">10,000</div>
+        </div>
+        <div class="panel-close"><button class="btn" id="btn-close-pilot">CLOSE</button></div>
+      </div>
+    </div>
+
+    <!-- Market: only ever opened while landed — see updateLandLaunchControl
+         / the MARKET control, which is disabled unless player.location
+         is 'landed'. Prices come from Economy.priceAt, keyed by whatever
+         body the ship is currently landed on. -->
+    <div class="overlay" id="market-overlay">
+      <div class="panel codex-panel">
+        <h2 id="market-title">MARKET</h2>
+        <div id="market-credits" style="margin-bottom:10px;font-size:13px;color:var(--green-bright);">CREDITS: 10,000</div>
+        <div id="market-body"></div>
+        <div class="panel-close"><button class="btn" id="btn-close-market">CLOSE</button></div>
+      </div>
+    </div>
+
     <!-- World-info auto-popup: shown automatically on arrival at a
          planet/moon (see checkWorldArrival in the script below), and
          also reachable by tapping an entry in the Codex. -->
@@ -384,6 +415,7 @@
 
 <script src="state.js"></script>
 <script src="codex.js"></script>
+<script src="economy.js"></script>
 <script src="physics.js"></script>
 <script src="save.js"></script>
 <script src="starmap.js"></script>
@@ -532,6 +564,10 @@ function updateLandLaunchControl() {
       btnLandLaunch.dataset.landableId = '';
     }
   }
+  // Market is only ever reachable while actually landed — there's no
+  // "remote ordering" concept, you have to be docked/grounded somewhere
+  // to restock from it.
+  document.getElementById('btn-market').disabled = gameState.player.location !== 'landed';
 }
 
 btnLandLaunch.addEventListener('click', () => {
@@ -717,6 +753,90 @@ function checkWorldArrival() {
   }
 }
 
+function formatCredits(n) {
+  return Math.round(n).toLocaleString('en-US');
+}
+
+// ---- Pilot readout ----
+const pilotOverlay = document.getElementById('pilot-overlay');
+const pilotNameInput = document.getElementById('pilot-name-input');
+document.getElementById('btn-pilot').addEventListener('click', () => {
+  pilotNameInput.value = gameState.player.pilotName;
+  document.getElementById('pilot-credits').textContent = formatCredits(gameState.player.credits);
+  menuOverlay.classList.remove('visible');
+  pilotOverlay.classList.add('visible');
+});
+pilotNameInput.addEventListener('input', e => {
+  gameState.player.pilotName = e.target.value;
+});
+document.getElementById('btn-close-pilot').addEventListener('click', () => {
+  // An emptied-out field falls back to a sane default rather than
+  // leaving the pilot permanently nameless.
+  if (!gameState.player.pilotName.trim()) gameState.player.pilotName = 'Unnamed Pilot';
+  pilotOverlay.classList.remove('visible');
+});
+
+// ---- Market (restock consumables while landed) ----
+const RESOURCE_LABELS = { fuel: 'FUEL', oxygen: 'OXYGEN', supplies: 'SUPPLIES' };
+function renderMarket() {
+  const system = getCurrentSystem(gameState);
+  const bodyId = gameState.player.landedBodyId;
+  const body = Physics.findBody(system, bodyId);
+  const ship = gameState.player.ship;
+
+  document.getElementById('market-title').textContent = body ? `MARKET — ${body.name.toUpperCase()}` : 'MARKET';
+  document.getElementById('market-credits').textContent = `CREDITS: ${formatCredits(gameState.player.credits)}`;
+
+  let html = '';
+  ['fuel', 'oxygen', 'supplies'].forEach(key => {
+    const current = ship[key];
+    const max = ship[key + 'Max'];
+    const price = Economy.priceAt(bodyId, key);
+    const needed = Math.max(0, max - current);
+    const fullCost = needed * price;
+    const affordableUnits = price > 0 ? gameState.player.credits / price : needed;
+    const canAffordFull = affordableUnits >= needed;
+    html += `<div class="codex-field">
+      <div class="codex-field-label">${RESOURCE_LABELS[key]} — ${Math.round(current)}/${Math.round(max)} — ${price.toFixed(2)} CR/UNIT</div>
+      <div class="codex-field-body">
+        <button class="btn small" data-buy="${key}" ${needed <= 0 ? 'disabled' : ''}>
+          ${needed <= 0 ? 'FULL' : (canAffordFull ? `FILL (${fullCost.toFixed(0)} CR)` : 'FILL (PARTIAL — LOW CREDITS)')}
+        </button>
+      </div>
+    </div>`;
+  });
+  document.getElementById('market-body').innerHTML = html;
+}
+
+function buyResource(key) {
+  const ship = gameState.player.ship;
+  const bodyId = gameState.player.landedBodyId;
+  const price = Economy.priceAt(bodyId, key);
+  if (price === null || price <= 0) return;
+  const needed = ship[key + 'Max'] - ship[key];
+  if (needed <= 0) return;
+  const affordableUnits = gameState.player.credits / price;
+  const unitsToBuy = Math.min(needed, affordableUnits);
+  if (unitsToBuy <= 0) return;
+  const cost = unitsToBuy * price;
+  ship[key] = Math.min(ship[key + 'Max'], ship[key] + unitsToBuy);
+  gameState.player.credits = Math.max(0, gameState.player.credits - cost);
+  renderMarket();
+  updateHud();
+}
+document.getElementById('market-body').addEventListener('click', e => {
+  const btn = e.target.closest('[data-buy]');
+  if (btn) buyResource(btn.dataset.buy);
+});
+document.getElementById('btn-market').addEventListener('click', () => {
+  if (gameState.player.location !== 'landed') return; // button should already be disabled in this case
+  renderMarket();
+  document.getElementById('market-overlay').classList.add('visible');
+});
+document.getElementById('btn-close-market').addEventListener('click', () => {
+  document.getElementById('market-overlay').classList.remove('visible');
+});
+
 // Whenever gameState is replaced wholesale (load/new game/import), the
 // control buttons need to resync their visual state to match — otherwise
 // e.g. the pause button could still say "RESUME" after loading a save
@@ -853,6 +973,17 @@ function updateHud() {
   setBar('bar-oxygen', (ship.oxygen / ship.oxygenMax) * 100);
   setBar('bar-supplies', (ship.supplies / ship.suppliesMax) * 100);
   setBar('bar-hull', (ship.hull / ship.hullMax) * 100);
+
+  setReadout('readout-fuel', ship.fuel, ship.fuelMax);
+  setReadout('readout-oxygen', ship.oxygen, ship.oxygenMax);
+  setReadout('readout-supplies', ship.supplies, ship.suppliesMax);
+  setReadout('readout-hull', ship.hull, ship.hullMax);
+
+  document.getElementById('hud-credits').textContent = `CREDITS: ${formatCredits(gameState.player.credits)}`;
+}
+
+function setReadout(id, current, max) {
+  document.getElementById(id).textContent = `${Math.round(current)}/${Math.round(max)}`;
 }
 
 // ---- Main loop ----

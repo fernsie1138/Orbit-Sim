@@ -227,10 +227,17 @@ function createDefaultSystem() {
 // Launch (reversing a landing), so both go through the exact same,
 // already-verified-stable math rather than two independent formulas
 // that could quietly drift out of sync with each other over time.
-// Returns null for a massless body (a station) — there's no orbit
-// concept around something with no gravity.
+// Works for a massless body (a station) too, even though there's no
+// real orbit concept around something with no gravity: the formula here
+// is pure geometry (how far above the surface, how far below any
+// moon's orbit) and never actually divides by mu, so it still produces
+// a perfectly sensible "how far to stand off" distance — and
+// circularOrbitState below naturally degenerates to "match the body's
+// own velocity, zero relative speed" when mu is 0, which is exactly the
+// physically-correct (and only sensible) thing to do for an orbit around
+// something with no gravity. That means launch() can treat every
+// landable body identically, station or not, with no special-casing.
 function lowOrbitRadius(system, body) {
-  if (!body.mu) return null;
   return Math.max(
     body.radius * 4,  // healthy clearance above the body's own surface
     Math.min(body.radius * 6, innermostMoonOrbitRadius(system, body) * 0.15)
@@ -238,31 +245,36 @@ function lowOrbitRadius(system, body) {
 }
 
 // A full circular-orbit ship state (position + velocity) at the given
-// radius around `body`, expressed in world-space (star-centered)
-// coordinates — i.e. the body's own current position/velocity plus a
-// perpendicular orbital component for the ship, so the result is a
-// genuine two-body circular orbit rather than a stray vector that only
+// radius and angle around `body`, expressed in world-space (star-
+// centered) coordinates — i.e. the body's own current position/velocity
+// plus a perpendicular orbital component for the ship, so the result is
+// a genuine two-body circular orbit rather than a stray vector that only
 // looks plausible.
 //
-// Places the ship "above" the body (local +y) moving in -x relative to
-// it, which gives COUNTERCLOCKWISE motion (positive angular momentum:
-// x*vy - y*vx = 0*0 - r*(-v) = +r*v) — matching the direction every
-// planet, moon, and station in this system orbits (set by makeBody's
-// angular-velocity derivation and circularVelocityAt's "+90 degrees"
-// tangential convention elsewhere in the codebase). Moving in +x instead
-// would give CLOCKWISE motion, opposite every other body — invisible to
-// plain orbital-radius stability testing, but the kind of mismatch that
-// silently breaks any later phase-angle-based reasoning about "does the
-// ship lead or lag the body," so this convention is deliberate and
-// shared by every caller rather than each picking its own direction.
-function circularOrbitState(system, body, radius) {
+// `angle` (standard math convention, 0 = local +x, increasing
+// counterclockwise) defaults to "above" the body (local +y, angle =
+// PI/2) for backward compatibility with the original spawn-orbit
+// placement, but callers can pick any angle — needed for e.g. placing a
+// launched ship at a specific phase on a shared orbit (see launch()'s
+// station-undock case below) rather than always "north" of the body.
+//
+// Whatever angle is chosen, motion is always COUNTERCLOCKWISE (tangent
+// direction = angle + 90°), matching the direction every planet, moon,
+// and station in this system orbits (set by makeBody's angular-velocity
+// derivation and circularVelocityAt's "+90 degrees" tangential
+// convention elsewhere in the codebase) — verified this generalization
+// still matches the original hardcoded formula exactly at the default
+// angle (PI/2) before relying on it elsewhere.
+function circularOrbitState(system, body, radius, angle) {
+  if (angle === undefined) angle = Math.PI / 2;
   const bodyPos = Physics.worldPosition(system, body);
   const bodyVel = bodyWorldVelocity(system, body);
   const relSpeed = Math.sqrt(body.mu / radius);
-  const x = bodyPos.x;
-  const y = bodyPos.y + radius;
-  const vx = bodyVel.vx - relSpeed;
-  const vy = bodyVel.vy;
+  const tangentAngle = angle + Math.PI / 2;
+  const x = bodyPos.x + Math.cos(angle) * radius;
+  const y = bodyPos.y + Math.sin(angle) * radius;
+  const vx = bodyVel.vx + Math.cos(tangentAngle) * relSpeed;
+  const vy = bodyVel.vy + Math.sin(tangentAngle) * relSpeed;
   return { x, y, vx, vy, heading: Math.atan2(vy - bodyVel.vy, vx - bodyVel.vx) };
 }
 
@@ -298,6 +310,8 @@ function createNewGameState() {
     systems: [system],
     currentSystemId: system.id,
     player: {
+      pilotName: 'Unnamed Pilot', // player-editable, see the Pilot readout screen
+      credits: 10000,            // starting balance; spent restocking consumables while landed (see Economy/market)
       location: 'space',        // 'space' | 'landed' | 'docked' | 'eva' (future)
       landedBodyId: null,       // which body the ship is currently landed
                                  // on, or null while flying — see

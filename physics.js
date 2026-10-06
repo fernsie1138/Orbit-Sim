@@ -403,17 +403,18 @@ const Physics = (() => {
   // everything else — 10 minutes of travel compressed into 6 real
   // seconds at 100x still costs the crew 10 minutes' worth of air and
   // food, not an artificially-preserved amount just because the player
-  // fast-forwarded). Rates are chosen so oxygen and supplies are a real,
-  // fairly fast-moving concern within a single play session, while hull
-  // wear is deliberately much slower — still visibly ticking down if you
+  // fast-forwarded). Oxygen/supplies were originally tuned faster, but
+  // that ran them out too quickly in practice, so both are now at 10% of
+  // their original rate — still a real concern over a long session, just
+  // not an urgent one minute-to-minute. Hull wear is unchanged, and
+  // remains the slowest of the three — still visibly ticking down if you
   // watch it, but not an urgent problem the way fuel/oxygen are meant to
   // be. All three clamp at 0 like fuel already does; there's no
   // additional failure-state behavior yet (no crew/hull-loss consequence
-  // system exists), matching the current scope of "change the rates,"
-  // not "add new consequences."
-  const OXYGEN_DEPLETION_RATE = 0.15;   // units/sec of sim time (max 100 -> ~11 min to empty)
-  const SUPPLIES_DEPLETION_RATE = 0.08; // units/sec of sim time (max 100 -> ~21 min to empty)
-  const HULL_DEPLETION_RATE = 0.02;     // units/sec of sim time (max 100 -> ~83 min to empty)
+  // system exists).
+  const OXYGEN_DEPLETION_RATE = 0.015;   // units/sec of sim time (max 100 -> ~111 min to empty)
+  const SUPPLIES_DEPLETION_RATE = 0.008; // units/sec of sim time (max 100 -> ~208 min to empty)
+  const HULL_DEPLETION_RATE = 0.02;      // units/sec of sim time (max 100 -> ~83 min to empty)
 
   function applyLifeSupportDrain(ship, dt) {
     ship.oxygen = Math.max(0, ship.oxygen - OXYGEN_DEPLETION_RATE * dt);
@@ -637,36 +638,60 @@ const Physics = (() => {
   }
 
   // Launch: the reverse of land() — place the ship in a stable low orbit
-  // around whatever body it's currently landed on. For a body with real
-  // gravity (a planet or moon), this is a genuine circular orbit (the
-  // exact same math used for the player's initial spawn — see
-  // circularOrbitState in state.js). For a massless station, there's no
-  // orbit to speak of, so the ship is just placed a short, safe distance
-  // away moving at the station's own velocity (a simple "undock," no
-  // relative drift to manage).
+  // around whatever body it's currently landed on.
+  //
+  // For a body with real gravity (a planet or moon), this is a genuine
+  // circular orbit AROUND THAT BODY — the exact same math used for the
+  // player's initial spawn.
+  //
+  // For a massless station, there's no gravity to actually orbit, so
+  // instead the ship is placed on the SAME orbit the station ITSELF is
+  // on around its own parent (same radius, same speed, just a small
+  // angular nudge so it doesn't start exactly inside the station) —
+  // corotating with the station rather than drifting apart from it.
+  // This matters more than it might sound: an earlier version placed the
+  // ship a short distance further out from the STATION, matching the
+  // station's velocity — which sounds reasonable, but for a station on a
+  // fast, close orbit (confirmed: aldrin-station orbits Aldrin in just
+  // ~5.4 seconds) even a small radial offset puts the ship on a
+  // meaningfully different orbit, and the two separate within one or two
+  // orbital periods — tens of units apart within under a minute. Staying
+  // on the station's OWN orbit (same radius around the real gravity
+  // source, just offset in angle/phase) keeps the ship and station
+  // moving at the same angular rate indefinitely, so their separation
+  // stays roughly constant instead of compounding every orbit.
   function launch(state) {
     const system = getCurrentSystem(state);
     const ship = state.player.ship;
     const body = findBody(system, state.player.landedBodyId);
     if (!body) { state.player.location = 'space'; state.player.landedBodyId = null; return; }
 
+    let orbitState;
     if (body.mu) {
       const orbitR = lowOrbitRadius(system, body);
-      const orbitState = circularOrbitState(system, body, orbitR);
-      ship.x = orbitState.x; ship.y = orbitState.y;
-      ship.vx = orbitState.vx; ship.vy = orbitState.vy;
-      ship.heading = orbitState.heading;
+      orbitState = circularOrbitState(system, body, orbitR);
+    } else if (body.parentId) {
+      const parent = findBody(system, body.parentId);
+      // Angular nudge sized so the ship starts comfortably clear of the
+      // station itself (a few station-radii of arc length), converted
+      // from a linear distance to an angle via arc-length = radius *
+      // angle — small enough to barely affect the shared orbit, large
+      // enough not to spawn inside the station.
+      const angleNudge = Math.max(body.radius * 4, 3) / body.orbitRadius;
+      orbitState = circularOrbitState(system, parent, body.orbitRadius, body.orbitAngle + angleNudge);
     } else {
+      // A massless body with no parent at all shouldn't exist in this
+      // game's data (every station orbits something), but fall back to
+      // just sitting at the body's own position with zero relative
+      // velocity rather than crashing if one ever did.
       const bodyPos = worldPosition(system, body);
-      const bodyVel = bodyWorldVelocityAt(system, body, allWorldPositions(system));
-      const standoffAngle = body.orbitAngle + (state.player.landingOffsetAngle || 0);
-      const standoff = Math.max(body.radius * 2, 3);
-      ship.x = bodyPos.x + Math.cos(standoffAngle) * standoff;
-      ship.y = bodyPos.y + Math.sin(standoffAngle) * standoff;
-      ship.vx = bodyVel.vx;
-      ship.vy = bodyVel.vy;
-      ship.heading = Math.atan2(Math.sin(standoffAngle), Math.cos(standoffAngle));
+      orbitState = { x: bodyPos.x, y: bodyPos.y, vx: 0, vy: 0, heading: 0 };
     }
+
+    ship.x = orbitState.x; ship.y = orbitState.y;
+    ship.vx = orbitState.vx; ship.vy = orbitState.vy;
+    ship.heading = orbitState.heading;
+
     ship.lastDominantBodyId = body.mu ? body.id : null;
     ship.captureWatchBodyId = null;
     ship.captureWatchPrevRadialSign = 0;

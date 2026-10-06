@@ -20,7 +20,7 @@ const SaveSystem = (() => {
                                                 // isn't silently lost, not
                                                 // because the old name means
                                                 // anything going forward.
-  const CURRENT_VERSION = 8;
+  const CURRENT_VERSION = 9;
 
   function save(state) {
     state.meta.savedAt = Date.now();
@@ -163,6 +163,19 @@ const SaveSystem = (() => {
         if (star && star.name === 'Sol') star.name = 'Thessaly';
       });
       v = 8;
+    }
+
+    if (v < 9) {
+      // Added pilot name + credits (player.pilotName, player.credits).
+      // Old saves have neither — default to the same starting values a
+      // new game gets, since there's no sensible way to retroactively
+      // know what an existing save "should" have had.
+      const player = state.player;
+      if (player && typeof player.pilotName === 'undefined') {
+        player.pilotName = 'Unnamed Pilot';
+        player.credits = 10000;
+      }
+      v = 9;
     }
 
     state.meta.version = CURRENT_VERSION;
