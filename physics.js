@@ -504,20 +504,139 @@ const Physics = (() => {
     return Math.min(realSeconds * state.time.timeScale, MAX_SIM_SECONDS_PER_FRAME);
   }
 
+  // How close a ship needs to be to a body to land on it — "low orbit"
+  // for a planet/moon, or just "nearby" for a massless station (which
+  // has no orbit to speak of). Scales with the body's own physical size
+  // so a tiny station isn't effectively unlandable while a large planet
+  // isn't absurdly easy to land on from a wide orbit, with a minimum
+  // floor so even the smallest station has SOME realistic capture zone.
+  const LANDING_RANGE_MULTIPLIER = 3;
+  const LANDING_RANGE_MIN = 3; // Mm
+  function landingRangeFor(body) {
+    return Math.max(body.radius * LANDING_RANGE_MULTIPLIER, LANDING_RANGE_MIN);
+  }
+
+  // Finds the best body the ship could land on right now (closest one
+  // within its own landing range), or null if nothing qualifies. Checks
+  // every planet/moon/station/asteroid — not just the current dominant
+  // (gravity) body — since a massless station never "dominates" gravity
+  // at all (see dominantBody) but should still be landable purely by
+  // proximity, same as a planet or moon.
+  function findLandableBody(system, ship) {
+    let best = null, bestDist = Infinity;
+    for (const b of system.bodies) {
+      if (b.kind !== 'planet' && b.kind !== 'moon' && b.kind !== 'station' && b.kind !== 'asteroid') continue;
+      const pos = worldPosition(system, b);
+      const dist = Math.hypot(ship.x - pos.x, ship.y - pos.y);
+      if (dist <= landingRangeFor(b) && dist < bestDist) { bestDist = dist; best = b; }
+    }
+    return best;
+  }
+
+  // While landed, the ship doesn't fly — it's repositioned every frame to
+  // track the landed body's CURRENT position (bodies keep orbiting in the
+  // background even while the player is on the surface), at a fixed
+  // radius just above the body and a fixed ANGLE RELATIVE TO THE BODY'S
+  // OWN orbitAngle (not a fixed absolute angle), so the ship stays at a
+  // consistent "spot" as the body travels along its own orbit rather than
+  // visually sliding around it over time. Velocity is zeroed since it's
+  // unused while landed (position is set directly, not integrated) and
+  // zero reads correctly on the HUD ("stationary, landed").
+  function updateLandedShipPosition(state) {
+    const system = getCurrentSystem(state);
+    const ship = state.player.ship;
+    const body = findBody(system, state.player.landedBodyId);
+    if (!body) return; // shouldn't happen, but don't crash if a save is ever in a weird state
+    const bodyPos = worldPosition(system, body);
+    const angle = body.orbitAngle + (state.player.landingOffsetAngle || 0);
+    const landingRadius = Math.max(body.radius * 1.05, body.radius + 1);
+    ship.x = bodyPos.x + Math.cos(angle) * landingRadius;
+    ship.y = bodyPos.y + Math.sin(angle) * landingRadius;
+    ship.vx = 0;
+    ship.vy = 0;
+  }
+
   function step(state, realSeconds, controls = null) {
     if (state.time.paused) return;
     const dt = frameDt(state, realSeconds);
     const system = getCurrentSystem(state);
     const ship = state.player.ship;
 
-    if (controls) {
-      stepAttitude(system, ship, dt, controls.rotate || 0);
-      if (controls.thrust) thrustForward(ship, dt);
+    if (state.player.location === 'landed') {
+      // Bodies still advance (the exact closed-form angle update in
+      // stepBodies is not an approximation, so one big dt step here is
+      // exactly as accurate as many small ones — unlike the ship's own
+      // RK4 integration, there's no stability reason to substep this),
+      // but the ship itself doesn't fly: no attitude, no thrust, no
+      // orbital integration.
+      stepBodies(system, dt);
+      updateLandedShipPosition(state);
+    } else {
+      if (controls) {
+        stepAttitude(system, ship, dt, controls.rotate || 0);
+        if (controls.thrust) thrustForward(ship, dt);
+      }
+      stepShip(system, ship, dt);
     }
 
-    stepShip(system, ship, dt);
     state.time.simSeconds += dt;
     state.meta.playTimeSeconds += realSeconds;
+  }
+
+  // Land the ship at `body` (must be one findLandableBody would currently
+  // return, though this doesn't re-check that itself — callers check
+  // before offering the control). Records the ship's CURRENT bearing
+  // from the body as the landing spot (relative to the body's own
+  // orbitAngle — see updateLandedShipPosition) so the ship visually
+  // lands roughly where it approached from, rather than snapping to an
+  // arbitrary fixed side.
+  function land(state, body) {
+    const system = getCurrentSystem(state);
+    const ship = state.player.ship;
+    const bodyPos = worldPosition(system, body);
+    const bearingAngle = Math.atan2(ship.y - bodyPos.y, ship.x - bodyPos.x);
+    state.player.location = 'landed';
+    state.player.landedBodyId = body.id;
+    state.player.landingOffsetAngle = bearingAngle - body.orbitAngle;
+    updateLandedShipPosition(state);
+  }
+
+  // Launch: the reverse of land() — place the ship in a stable low orbit
+  // around whatever body it's currently landed on. For a body with real
+  // gravity (a planet or moon), this is a genuine circular orbit (the
+  // exact same math used for the player's initial spawn — see
+  // circularOrbitState in state.js). For a massless station, there's no
+  // orbit to speak of, so the ship is just placed a short, safe distance
+  // away moving at the station's own velocity (a simple "undock," no
+  // relative drift to manage).
+  function launch(state) {
+    const system = getCurrentSystem(state);
+    const ship = state.player.ship;
+    const body = findBody(system, state.player.landedBodyId);
+    if (!body) { state.player.location = 'space'; state.player.landedBodyId = null; return; }
+
+    if (body.mu) {
+      const orbitR = lowOrbitRadius(system, body);
+      const orbitState = circularOrbitState(system, body, orbitR);
+      ship.x = orbitState.x; ship.y = orbitState.y;
+      ship.vx = orbitState.vx; ship.vy = orbitState.vy;
+      ship.heading = orbitState.heading;
+    } else {
+      const bodyPos = worldPosition(system, body);
+      const bodyVel = bodyWorldVelocityAt(system, body, allWorldPositions(system));
+      const standoffAngle = body.orbitAngle + (state.player.landingOffsetAngle || 0);
+      const standoff = Math.max(body.radius * 2, 3);
+      ship.x = bodyPos.x + Math.cos(standoffAngle) * standoff;
+      ship.y = bodyPos.y + Math.sin(standoffAngle) * standoff;
+      ship.vx = bodyVel.vx;
+      ship.vy = bodyVel.vy;
+      ship.heading = Math.atan2(Math.sin(standoffAngle), Math.cos(standoffAngle));
+    }
+    ship.lastDominantBodyId = body.mu ? body.id : null;
+    ship.captureWatchBodyId = null;
+    ship.captureWatchPrevRadialSign = 0;
+    state.player.location = 'space';
+    state.player.landedBodyId = null;
   }
 
   // Find whichever body's "sphere of influence" (simplified: just nearest
@@ -740,5 +859,6 @@ const Physics = (() => {
     stepShip, applyBurn, thrustForward, stepAttitude, velocityHeading, step, frameDt,
     nearestBody, predictTrajectory, orbitalElements, THRUST_ACCEL, bodyWorldVelocityAt,
     applySoftCapture, CAPTURE_SPEED_FRACTION,
+    landingRangeFor, findLandableBody, land, launch,
   };
 })();

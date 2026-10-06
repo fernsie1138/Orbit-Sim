@@ -97,6 +97,8 @@
   .btn:active { background: rgba(51,255,51,0.25); }
   .btn.primary { border-color: var(--green); color: var(--green-bright); }
   .btn.small { padding: 8px 10px; font-size: 11px; }
+  .btn:disabled { opacity: 0.35; }
+  .btn.landed { border-color: var(--amber); color: var(--amber); }
 
   #control-panel {
     position: absolute;
@@ -228,6 +230,7 @@
     <div class="hud-corner" id="hud-top-right">
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 1</div>
     </div>
 
     <div class="hud-corner" id="hud-bottom-left">
@@ -259,6 +262,7 @@
         <button class="btn wide" id="btn-burn" title="Burn">▲ BURN</button>
         <button class="btn" id="btn-align-prograde" title="Align Prograde">PRO<br>GRADE</button>
         <button class="btn" id="btn-align-retrograde" title="Align Retrograde">RETRO<br>GRADE</button>
+        <button class="btn wide" id="btn-land-launch" title="Land / Launch" disabled>LAND</button>
       </div>
     </div>
 
@@ -386,6 +390,74 @@ function setAlignTarget(target) {
 btnAlignPro.addEventListener('click', () => setAlignTarget('prograde'));
 btnAlignRetro.addEventListener('click', () => setAlignTarget('retrograde'));
 
+// ---- Land / Launch ----
+// One button that does either job depending on current state: LAND when
+// flying close enough to a planet/moon/station ("low orbit" — see
+// Physics.landingRangeFor), LAUNCH when already landed. Checked every
+// frame (see updateLandLaunchControl, called from the main loop) since
+// "close enough to land" is a continuous flight condition, not something
+// only known at the moment of a button press.
+//
+// For now landing/launching is a placeholder: a notification and an
+// instant state flip, with no landing sequence or surface activities —
+// those come later. Launch always places the ship in a fresh low orbit
+// (or, for a massless station, a simple short-range undock) using the
+// exact same math as the game's initial spawn, so it's just as stable.
+const btnLandLaunch = document.getElementById('btn-land-launch');
+
+function setFlightControlsEnabled(enabled) {
+  [btnRotateLeft, btnRotateRight, btnBurn, btnAlignPro, btnAlignRetro].forEach(btn => {
+    btn.disabled = !enabled;
+  });
+  if (!enabled) {
+    heldControls.rotate = 0;
+    heldControls.thrust = false;
+    btnRotateLeft.classList.remove('active');
+    btnRotateRight.classList.remove('active');
+    btnBurn.classList.remove('active');
+  }
+}
+
+function updateLandLaunchControl() {
+  const system = getCurrentSystem(gameState);
+  if (gameState.player.location === 'landed') {
+    btnLandLaunch.disabled = false;
+    btnLandLaunch.textContent = 'LAUNCH';
+    btnLandLaunch.classList.add('landed');
+    btnLandLaunch.dataset.landableId = '';
+  } else {
+    const landable = Physics.findLandableBody(system, gameState.player.ship);
+    btnLandLaunch.classList.remove('landed');
+    if (landable) {
+      btnLandLaunch.disabled = false;
+      btnLandLaunch.textContent = `LAND: ${landable.name.toUpperCase()}`;
+      btnLandLaunch.dataset.landableId = landable.id;
+    } else {
+      btnLandLaunch.disabled = true;
+      btnLandLaunch.textContent = 'LAND';
+      btnLandLaunch.dataset.landableId = '';
+    }
+  }
+}
+
+btnLandLaunch.addEventListener('click', () => {
+  const system = getCurrentSystem(gameState);
+  if (gameState.player.location === 'landed') {
+    const body = Physics.findBody(system, gameState.player.landedBodyId);
+    const name = body ? body.name.toUpperCase() : 'ORBIT';
+    Physics.launch(gameState);
+    setFlightControlsEnabled(true);
+    showToast(`LAUNCHED — IN ORBIT AROUND ${name}`);
+  } else {
+    const landableId = btnLandLaunch.dataset.landableId;
+    const body = landableId ? Physics.findBody(system, landableId) : null;
+    if (!body) return; // button should be disabled in this case, but don't act on stale data
+    Physics.land(gameState, body);
+    setFlightControlsEnabled(false);
+    showToast(`LANDED AT ${body.name.toUpperCase()}`);
+  }
+  updateLandLaunchControl();
+});
 
 // ---- Pause ----
 const btnPause = document.getElementById('btn-pause');
@@ -440,6 +512,8 @@ function syncControlButtonsToState() {
   btnRotateLeft.classList.remove('active');
   btnRotateRight.classList.remove('active');
   btnBurn.classList.remove('active');
+  setFlightControlsEnabled(gameState.player.location !== 'landed');
+  updateLandLaunchControl();
 }
 
 document.getElementById('btn-save').onclick = () => {
@@ -534,12 +608,17 @@ function updateHud() {
   const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
   document.getElementById('hud-speed').textContent = `V: ${speed.toFixed(2)} km/s`;
 
-  const els = Physics.orbitalElements(system, ship);
   const orbitEl = document.getElementById('hud-orbit');
-  if (els && els.closed) {
-    orbitEl.textContent = `AP: ${els.rApo.toFixed(1)} PE: ${els.rPeri.toFixed(1)}`;
+  if (gameState.player.location === 'landed') {
+    const landedBody = Physics.findBody(system, gameState.player.landedBodyId);
+    orbitEl.textContent = `LANDED: ${landedBody ? landedBody.name.toUpperCase() : '—'}`;
   } else {
-    orbitEl.textContent = 'AP: ESCAPE PE: —';
+    const els = Physics.orbitalElements(system, ship);
+    if (els && els.closed) {
+      orbitEl.textContent = `AP: ${els.rApo.toFixed(1)} PE: ${els.rPeri.toFixed(1)}`;
+    } else {
+      orbitEl.textContent = 'AP: ESCAPE PE: —';
+    }
   }
 
   document.getElementById('hud-clock').textContent = fmtClock(gameState.time.simSeconds);
@@ -560,6 +639,7 @@ function loop(now) {
   Physics.step(gameState, realDt, heldControls);
   StarMap.draw(gameState);
   updateHud();
+  updateLandLaunchControl();
 
   requestAnimationFrame(loop);
 }

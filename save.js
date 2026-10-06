@@ -12,7 +12,7 @@
 
 const SaveSystem = (() => {
   const STORAGE_KEY = 'spacesim.save.v1';
-  const CURRENT_VERSION = 6;
+  const CURRENT_VERSION = 7;
 
   function save(state) {
     state.meta.savedAt = Date.now();
@@ -124,6 +124,19 @@ const SaveSystem = (() => {
         ship.captureWatchPrevRadialSign = 0;
       }
       v = 6;
+    }
+
+    if (v < 7) {
+      // Added landing/launch (player.landedBodyId, player.landingOffsetAngle).
+      // Old saves have neither — default to "not landed," which is always
+      // a safe state to resume into regardless of where the save left off.
+      const player = state.player;
+      if (player && typeof player.landedBodyId === 'undefined') {
+        player.landedBodyId = null;
+        player.landingOffsetAngle = 0;
+        if (player.location === 'landed') player.location = 'space'; // shouldn't happen pre-v7, but stay safe
+      }
+      v = 7;
     }
 
     state.meta.version = CURRENT_VERSION;

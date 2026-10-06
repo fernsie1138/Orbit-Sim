@@ -76,7 +76,14 @@ const StarMap = (() => {
 
     drawOrbitRings(system, camera);
     drawBodies(state, system, camera);
-    drawTrajectory(state, system, camera);
+    // A predicted flight path makes no sense for a ship sitting landed —
+    // its velocity is zeroed and held in place (see Physics.step's
+    // landed-ship handling), so plotting an "orbit" from that would just
+    // draw a degenerate straight-line-fall trajectory through the body
+    // it's parked on.
+    if (state.player.location !== 'landed') {
+      drawTrajectory(state, system, camera);
+    }
     drawShip(state, camera);
     drawScanlines(w, h);
   }

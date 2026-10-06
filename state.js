@@ -210,6 +210,56 @@ function createDefaultSystem() {
   };
 }
 
+// A sensible "low orbit" radius for any body with real gravity (mu > 0):
+// comfortably above the surface, but clamped well below any moons the
+// body itself has, for the same reason the original Aldrin start-orbit
+// used this margin — even a small, distant moon's gravity perturbs a
+// nearby orbit enough to pump up eccentricity over many orbits (the same
+// effect behind real Kirkwood gaps), so staying well inside that zone
+// keeps a "parked" low orbit boring and stable rather than slowly
+// decaying. Used both for the player's initial spawn orbit AND for
+// Launch (reversing a landing), so both go through the exact same,
+// already-verified-stable math rather than two independent formulas
+// that could quietly drift out of sync with each other over time.
+// Returns null for a massless body (a station) — there's no orbit
+// concept around something with no gravity.
+function lowOrbitRadius(system, body) {
+  if (!body.mu) return null;
+  return Math.max(
+    body.radius * 4,  // healthy clearance above the body's own surface
+    Math.min(body.radius * 6, innermostMoonOrbitRadius(system, body) * 0.15)
+  );
+}
+
+// A full circular-orbit ship state (position + velocity) at the given
+// radius around `body`, expressed in world-space (star-centered)
+// coordinates — i.e. the body's own current position/velocity plus a
+// perpendicular orbital component for the ship, so the result is a
+// genuine two-body circular orbit rather than a stray vector that only
+// looks plausible.
+//
+// Places the ship "above" the body (local +y) moving in -x relative to
+// it, which gives COUNTERCLOCKWISE motion (positive angular momentum:
+// x*vy - y*vx = 0*0 - r*(-v) = +r*v) — matching the direction every
+// planet, moon, and station in this system orbits (set by makeBody's
+// angular-velocity derivation and circularVelocityAt's "+90 degrees"
+// tangential convention elsewhere in the codebase). Moving in +x instead
+// would give CLOCKWISE motion, opposite every other body — invisible to
+// plain orbital-radius stability testing, but the kind of mismatch that
+// silently breaks any later phase-angle-based reasoning about "does the
+// ship lead or lag the body," so this convention is deliberate and
+// shared by every caller rather than each picking its own direction.
+function circularOrbitState(system, body, radius) {
+  const bodyPos = Physics.worldPosition(system, body);
+  const bodyVel = bodyWorldVelocity(system, body);
+  const relSpeed = Math.sqrt(body.mu / radius);
+  const x = bodyPos.x;
+  const y = bodyPos.y + radius;
+  const vx = bodyVel.vx - relSpeed;
+  const vy = bodyVel.vy;
+  return { x, y, vx, vy, heading: Math.atan2(vy - bodyVel.vy, vx - bodyVel.vx) };
+}
+
 /* -------------------------------------------------------------------------
    Default new-game state. This whole object is what gets saved/loaded.
    Extra top-level keys (landing, eva, trade, combat, crew...) can be added
@@ -220,53 +270,12 @@ function createNewGameState() {
   const system = createDefaultSystem();
   const aldrin = system.bodies.find(b => b.id === 'aldrin');
 
-  // Start the player in a stable circular orbit around the first planet.
-  // Work entirely in world-space (star-centered) coordinates: take
-  // Aldrin's current world position + velocity, then add a perpendicular
-  // orbital velocity component for the ship. This is what makes the
-  // start state a genuine two-body circular orbit instead of a stray
-  // vector that happens to look plausible.
-  const aldrinPos = Physics.worldPosition(system, aldrin);
-  const aldrinVel = bodyWorldVelocity(system, aldrin);
-
-  const startOrbitR = Math.max(
-    aldrin.radius * 4,  // healthy clearance above the planet's own surface
-    Math.min(aldrin.radius * 6, innermostMoonOrbitRadius(system, aldrin) * 0.15)
-  );
-  // Clamped well below whatever moons exist so the ship starts in "clean"
-  // two-body space. Even a small, distant moon exerts a non-zero
-  // perturbation on a nearby orbit, and over hundreds to thousands of
-  // orbits that perturbation can resonantly pump up eccentricity until
-  // the orbit becomes unstable — this is genuine orbital mechanics (the
-  // same effect behind real Kirkwood gaps), but bad for a predictable
-  // starting position, so the margin here is generous (0.15x, not 0.4x)
-  // specifically to keep the DEFAULT start orbit boring and stable.
-  // Also floored well above the planet's physical radius so the ship
-  // doesn't start in the region where gravity softening (see gravityAt)
-  // distorts the force law at exactly the scale of its orbit.
-  const shipRelSpeed = Math.sqrt(aldrin.mu / startOrbitR);
-
-  // Place the ship "above" Aldrin (local +y) moving in -x relative to
-  // Aldrin. This gives COUNTERCLOCKWISE motion (positive angular
-  // momentum: x*vy - y*vx = 0*0 - r*(-v) = +r*v), matching the direction
-  // every planet, moon, and station in this system orbits — set by
-  // makeBody's angular-velocity derivation and circularVelocityAt's
-  // "+90 degrees" tangential convention elsewhere in the codebase. The
-  // ship previously moved in +x here, which gives CLOCKWISE motion —
-  // opposite every other body. That mismatch was invisible to plain
-  // stability testing (which only checks orbital RADIUS over time, not
-  // rotational direction) but silently broke phase-angle-based
-  // rendezvous math the moment the navigation computer needed to
-  // reason about "does the ship catch up to the target, or fall behind"
-  // — found by tracing a Hohmann transfer's wait-time calculation that
-  // was computing a phase that INCREASED over time when the formula
-  // (correctly, for two same-direction orbits) expected it to decrease,
-  // which traced back to the ship orbiting backwards relative to
-  // everything else in the system.
-  const shipX = aldrinPos.x;
-  const shipY = aldrinPos.y + startOrbitR;
-  const shipVx = aldrinVel.vx - shipRelSpeed;
-  const shipVy = aldrinVel.vy;
+  // Start the player in a stable circular orbit around the first planet
+  // — see circularOrbitState/lowOrbitRadius above for the shared math
+  // (also reused by Launch, so a freshly-launched ship starts exactly as
+  // stable as a freshly-spawned one).
+  const startOrbitR = lowOrbitRadius(system, aldrin);
+  const startState = circularOrbitState(system, aldrin, startOrbitR);
 
   return {
     meta: {
@@ -284,14 +293,25 @@ function createNewGameState() {
     currentSystemId: system.id,
     player: {
       location: 'space',        // 'space' | 'landed' | 'docked' | 'eva' (future)
+      landedBodyId: null,       // which body the ship is currently landed
+                                 // on, or null while flying — see
+                                 // Physics.step's landed-ship handling and
+                                 // the Land/Launch controls in index.html.
+      landingOffsetAngle: 0,    // angle (radians) the ship sits at,
+                                 // relative to the landed body's OWN
+                                 // orbitAngle — kept relative (not
+                                 // absolute) so the ship stays at a
+                                 // consistent "spot" as the body travels
+                                 // along its own orbit while landed,
+                                 // rather than sliding around it.
       ship: {
         // Position/velocity are in the CURRENT system's coordinate frame,
         // centered on that system's root body (the star), units Mm and Mm/s.
-        x: shipX,
-        y: shipY,
-        vx: shipVx,
-        vy: shipVy,
-        heading: Math.atan2(shipVy - aldrinVel.vy, shipVx - aldrinVel.vx),
+        x: startState.x,
+        y: startState.y,
+        vx: startState.vx,
+        vy: startState.vy,
+        heading: startState.heading,
         // Ship's facing direction in radians (0 = world +x axis, standard
         // math convention matching the canvas trig already used
         // elsewhere). Starts pointing prograde (along its own orbital
