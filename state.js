@@ -43,6 +43,13 @@ function makeBody({
                          // (used for things orbiting IT, and for ship gravity)
   color = '#33ff33',
   parentMu = 0,          // mu of the parent, used to derive angularVelocity
+  soiRadius = 0,         // explicit "sphere of influence" radius for
+                         // dominance/capture purposes (see
+                         // Physics.dominantBody and assignSoiRadii below);
+                         // 0/falsy means "never dominates on its own" —
+                         // true for stations (mu=0) and left unset here
+                         // for the star, which is the fallback owner of
+                         // any point no planet/moon's SOI claims.
 }) {
   let av = angularVelocity;
   if (!av && orbitRadius > 0 && parentMu > 0) {
@@ -52,8 +59,56 @@ function makeBody({
   return {
     id, name, kind, parentId,
     orbitRadius, orbitAngle, angularVelocity: av,
-    radius, mu, color,
+    radius, mu, color, soiRadius,
   };
+}
+
+// Assigns explicit sphere-of-influence radii to every planet and moon in
+// a freshly-built body list, used by Physics.dominantBody to decide "is
+// the ship captured by this body" with a real, consistent spatial
+// boundary (see that function for why the old implicit distance/radius-
+// ratio heuristic was replaced with this).
+//
+// Design goal (per-request): a planet's capture zone should read as
+// "about as far out as its outermost moon, or just a bit further" —
+// literally true here, not an incidental side effect of gravity tuning.
+// A moon, in turn, gets its OWN smaller capture zone carved out of the
+// gap between it and its neighbors (the next moon in, the next moon or
+// the planet's own SOI edge out), so a ship can be captured by a moon
+// specifically when close enough to it, without that zone ever
+// overlapping a sibling moon or poking past the planet's own boundary.
+const PLANET_SOI_MARGIN = 1.2;   // planet SOI = outermost moon's orbit * this
+const MOON_SOI_FRACTION = 0.4;   // moon SOI = this fraction of its tightest
+                                  // available gap to a neighbor/boundary
+function assignSoiRadii(bodies) {
+  const planets = bodies.filter(b => b.kind === BodyKind.PLANET);
+  planets.forEach(planet => {
+    const moons = bodies
+      .filter(b => b.kind === BodyKind.MOON && b.parentId === planet.id)
+      .sort((a, b) => a.orbitRadius - b.orbitRadius);
+
+    if (moons.length === 0) {
+      // No moons to anchor off — fall back to a modest multiple of the
+      // planet's own physical radius so it still has SOME capture zone.
+      planet.soiRadius = Math.max(planet.radius * 40, planet.orbitRadius * 0.05);
+      return;
+    }
+
+    const outerMoon = moons[moons.length - 1];
+    planet.soiRadius = outerMoon.orbitRadius * PLANET_SOI_MARGIN;
+
+    // Boundaries on either side of each moon: 0 (planet center) and the
+    // planet's own SOI edge bookend the sorted moon radii, so moon i's
+    // available room is simply the gap to its immediate neighbors on
+    // each side — this generalizes cleanly to any number of moons, not
+    // just the two this system currently has.
+    const boundaries = [0, ...moons.map(m => m.orbitRadius), planet.soiRadius];
+    moons.forEach((moon, i) => {
+      const inwardGap = boundaries[i + 1] - boundaries[i];
+      const outwardGap = boundaries[i + 2] - boundaries[i + 1];
+      moon.soiRadius = MOON_SOI_FRACTION * Math.min(inwardGap, outwardGap);
+    });
+  });
 }
 
 /* -------------------------------------------------------------------------
@@ -143,6 +198,10 @@ function createDefaultSystem() {
     radius: 1.5, mu: 0, color: '#ffffff',
     parentMu: starMu,
   }));
+
+  assignSoiRadii(bodies); // sets planet.soiRadius / moon.soiRadius — see
+                           // that function for the "about as far as the
+                           // outermost moon, or a bit further" design
 
   return {
     id: 'sol-system',
@@ -243,11 +302,29 @@ function createNewGameState() {
                              // the ship rotates itself toward that facing
                              // each frame instead of drifting freely;
                              // any manual rotation input cancels it.
-        autopilot: null,    // NavComp transfer plan object, or null when
-                             // flying manually — see navcomp.js. Persisted
-                             // through save/load so a save mid-transfer
-                             // resumes the autopilot rather than stranding
-                             // the ship or silently cancelling the plan.
+        autopilot: null,    // Vestigial: NavComp has been removed (temporarily —
+                             // real orbital mechanics made it too unforgiving
+                             // to use comfortably). Field kept, always null,
+                             // only so old saves that have it still load
+                             // cleanly without a migration step.
+        lastDominantBodyId: 'aldrin', // which body's SOI the ship was in as
+                             // of the last physics step — see
+                             // Physics.applySoftCapture, which compares this
+                             // to the CURRENT dominant body each substep to
+                             // detect "just entered a smaller SOI" (a
+                             // capture event) vs. "just left one" (no
+                             // capture needed). Initialized to match the
+                             // ship's actual starting body so the very
+                             // first physics step doesn't mistake game
+                             // start for a capture event.
+        captureWatchBodyId: null, // set by applySoftCapture while waiting
+                             // for periapsis after a capture event; null
+                             // when not currently watching anything.
+        captureWatchPrevRadialSign: 0, // -1/0/1 — tracks whether the ship
+                             // was last seen falling toward or moving
+                             // away from captureWatchBodyId, so the
+                             // negative-to-positive flip (periapsis) can
+                             // be detected.
         referenceBodyId: 'aldrin', // for display purposes ("orbiting Aldrin")
         fuel: 1000,
         fuelMax: 1000,

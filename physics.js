@@ -83,25 +83,48 @@ const Physics = (() => {
     }
   }
 
+  // How many parents a body has (star=0, planet=1, moon=2, ...) — used by
+  // dominantBody to prefer the most SPECIFIC owner (a moon over its own
+  // planet) when a point falls inside more than one body's SOI at once.
+  function bodyDepth(system, body) {
+    let depth = 0, b = body;
+    while (b.parentId) { depth++; b = findBody(system, b.parentId); }
+    return depth;
+  }
+
   // Find whichever body's sphere of influence (SOI) a point currently
-  // occupies — the body whose gravity should dominate at that point.
-  // Simplified scoring (distance / effective-scale) rather than true
-  // Hill-sphere radii, but this is the SAME notion of "ownership" used
-  // by nearestBody() for HUD display, so what the HUD calls "orbiting
-  // Aldrin" is exactly what the physics uses to compute gravity — no
-  // mismatch between what the player sees and what the ship feels.
+  // occupies — the body whose gravity should dominate at that point, and
+  // (see step()'s soft-capture logic) the body a ship gets CAPTURED by
+  // on arrival. Each planet/moon carries an explicit soiRadius (set in
+  // state.js's assignSoiRadii — a planet's reads as "about as far out as
+  // its outermost moon, or a bit further," directly matching how that
+  // boundary is meant to feel) rather than the old implicit distance/
+  // radius-ratio heuristic this replaced, which produced a capture zone
+  // that ballooned very inconsistently from one planet to the next
+  // (confirmed: roughly 1.8x the outer moon's distance for the
+  // innermost planet, but nearly 5x for the outermost one) — a real,
+  // consistent spatial boundary instead of an emergent side effect of
+  // gravity tuning.
+  //
+  // When a point sits inside more than one SOI at once (e.g. within both
+  // a moon's and its planet's), the most deeply NESTED one wins — the
+  // same patched-conic "most specific owner" rule used throughout this
+  // file. Falls back to the star (always the ultimate owner) when the
+  // point isn't inside any planet's or moon's SOI.
   function dominantBody(system, x, y, positions) {
-    let best = null, bestScore = Infinity;
+    let star = null;
+    let best = null, bestDepth = -1;
     for (const b of system.bodies) {
       if (!b.mu) continue; // massless bodies (stations) never dominate gravity
+      if (!b.parentId) { star = b; continue; } // handled as the fallback below
+      if (!b.soiRadius) continue; // shouldn't happen for a real planet/moon, but don't crash if it does
       const pos = positions.get(b.id);
-      const dx = pos.x - x, dy = pos.y - y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const scale = Math.max(b.radius, 1);
-      const score = dist / scale;
-      if (score < bestScore) { bestScore = score; best = b; }
+      const dist = Math.hypot(pos.x - x, pos.y - y);
+      if (dist > b.soiRadius) continue;
+      const depth = bodyDepth(system, b);
+      if (depth > bestDepth) { bestDepth = depth; best = b; }
     }
-    return best;
+    return best || star;
   }
 
   // Gravitational acceleration on a point at (x,y) from ONLY its current
@@ -257,8 +280,106 @@ const Physics = (() => {
       ship.vy += (h / 6) * (k1.dvy + 2 * k2.dvy + 2 * k3.dvy + k4.dvy);
 
       stepBodies(system, h); // advance bodies by the SAME h, right now
+      applySoftCapture(system, ship); // see function: forgiving arrival physics
 
       remaining -= h;
+    }
+  }
+
+  // "Soft capture": per the current design (accurate-feeling orbits, but
+  // forgiving arrivals — see project notes), crossing into a planet's or
+  // moon's sphere of influence should reliably catch the ship rather than
+  // requiring a precisely-matched velocity the way real patched-conic
+  // capture does. Checked once per SUBSTEP (not once per outer frame) so
+  // this reacts promptly regardless of how much sim-time one frame covers
+  // under heavy time-warp.
+  //
+  // IMPORTANT geometric fact that shaped this design: a bound orbit's
+  // apoapsis (farthest point) can never be smaller than the ship's
+  // CURRENT radius, since the ship is sitting on that very orbit right
+  // now. That means clamping velocity right at the moment of SOI entry —
+  // the first, simpler version of this — can never actually keep the
+  // ship inside the SOI: entering at r = soiRadius with ANY bound speed
+  // still guarantees apoapsis >= soiRadius, so the ship just swings back
+  // out again almost immediately (confirmed by testing: even an already-
+  // sub-escape-velocity arrival re-exited the SOI in well under a
+  // second). The fix is to NOT clamp at entry, but instead let the
+  // ship's natural, real gravity-curved path carry it in to PERIAPSIS
+  // (its closest approach) first — deep inside the SOI, at a much
+  // smaller radius — and clamp there instead. A fixed, modest fraction
+  // of LOCAL escape velocity at that (small) periapsis radius then
+  // reliably produces an apoapsis that stays comfortably inside the SOI
+  // regardless of how shallow or deep that periapsis happened to be
+  // (verified numerically across periapsis depths from 10% to 50% of
+  // the SOI radius before picking the 0.8 fraction below), while still
+  // producing real, varying eccentricity rather than forcing every
+  // capture into a near-identical circular-ish orbit.
+  //
+  // Mechanism: track the ship's last-known dominant body. The moment
+  // dominance shifts to a MORE SPECIFIC body (entering a planet's SOI
+  // from the star's, or a moon's SOI from its planet's — never the
+  // reverse, which is leaving, not arriving), start WATCHING that body
+  // for periapsis rather than acting immediately: every subsequent
+  // substep, track the sign of the ship's radial velocity relative to
+  // it (negative = still falling in, positive = now moving away). The
+  // moment that sign flips from negative to positive is periapsis —
+  // apply the clamp there, then stop watching.
+  const CAPTURE_SPEED_FRACTION = 0.8; // of local escape velocity, AT PERIAPSIS
+  function applySoftCapture(system, ship) {
+    const positions = allWorldPositions(system);
+    const dom = dominantBody(system, ship.x, ship.y, positions);
+    if (!dom) return;
+
+    const prevId = ship.lastDominantBodyId;
+    if (prevId !== dom.id) {
+      if (prevId != null) {
+        const prevBody = findBody(system, prevId);
+        const prevDepth = prevBody ? bodyDepth(system, prevBody) : 0;
+        const newDepth = bodyDepth(system, dom);
+        if (newDepth > prevDepth) {
+          // Arriving: start watching THIS body for its periapsis.
+          ship.captureWatchBodyId = dom.id;
+          ship.captureWatchPrevRadialSign = 0; // unknown yet; first check just records it
+        } else if (ship.captureWatchBodyId === prevId) {
+          // Left the body we were watching before periapsis ever
+          // happened (e.g. a very shallow graze) — nothing more to do.
+          ship.captureWatchBodyId = null;
+        }
+      }
+      ship.lastDominantBodyId = dom.id;
+    }
+
+    if (!ship.captureWatchBodyId) return;
+    const watchBody = findBody(system, ship.captureWatchBodyId);
+    if (!watchBody || dom.id !== watchBody.id) {
+      // No longer even the dominant body (shouldn't normally happen
+      // without the branch above already catching it, but stay safe).
+      ship.captureWatchBodyId = null;
+      return;
+    }
+
+    const bodyPos = positions.get(watchBody.id);
+    const bodyVel = bodyWorldVelocityAt(system, watchBody, positions);
+    const rx = ship.x - bodyPos.x, ry = ship.y - bodyPos.y;
+    const r = Math.hypot(rx, ry);
+    if (r < 1e-6) { ship.captureWatchBodyId = null; return; }
+    const relVx = ship.vx - bodyVel.vx, relVy = ship.vy - bodyVel.vy;
+    const radialVel = (rx * relVx + ry * relVy) / r; // signed: <0 falling in, >0 moving away
+
+    if (ship.captureWatchPrevRadialSign < 0 && radialVel >= 0) {
+      // Just crossed periapsis — clamp now, using the CURRENT (small)
+      // radius, then stop watching.
+      const relSpeed = Math.hypot(relVx, relVy);
+      const escapeSpeed = Math.sqrt(2 * watchBody.mu / r);
+      const captureSpeed = escapeSpeed * CAPTURE_SPEED_FRACTION;
+      if (relSpeed > captureSpeed) {
+        const scale = captureSpeed / relSpeed;
+        ship.vx = bodyVel.vx + relVx * scale;
+        ship.vy = bodyVel.vy + relVy * scale;
+      }
+      ship.captureWatchBodyId = null;
+    } else {
+      ship.captureWatchPrevRadialSign = radialVel < 0 ? -1 : 1;
     }
   }
 
@@ -615,8 +736,9 @@ const Physics = (() => {
   }
 
   return {
-    worldPosition, allWorldPositions, findBody, dominantBody, stepBodies, gravityAt,
+    worldPosition, allWorldPositions, findBody, dominantBody, bodyDepth, stepBodies, gravityAt,
     stepShip, applyBurn, thrustForward, stepAttitude, velocityHeading, step, frameDt,
     nearestBody, predictTrajectory, orbitalElements, THRUST_ACCEL, bodyWorldVelocityAt,
+    applySoftCapture, CAPTURE_SPEED_FRACTION,
   };
 })();

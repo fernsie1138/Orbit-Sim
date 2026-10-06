@@ -12,7 +12,7 @@
 
 const SaveSystem = (() => {
   const STORAGE_KEY = 'spacesim.save.v1';
-  const CURRENT_VERSION = 4;
+  const CURRENT_VERSION = 6;
 
   function save(state) {
     state.meta.savedAt = Date.now();
@@ -89,11 +89,41 @@ const SaveSystem = (() => {
     if (v < 4) {
       // Added NavComp autopilot (ship.autopilot). Old saves have no such
       // field — default to null (flying manually), never mid-transfer.
+      // (NavComp has since been removed again — see v5 — but this step
+      // stays so very old saves still migrate cleanly step by step.)
       const ship = state.player && state.player.ship;
       if (ship && typeof ship.autopilot === 'undefined') {
         ship.autopilot = null;
       }
       v = 4;
+    }
+
+    if (v < 5) {
+      // Added explicit-SOI soft capture (Physics.applySoftCapture), which
+      // needs ship.lastDominantBodyId to detect "just entered a smaller
+      // SOI" vs. "just left one." Old saves have no such field — default
+      // to null, which applySoftCapture treats as "don't clamp this
+      // first frame, just record whatever the ship's current dominant
+      // body is" rather than misreading a fresh load as a capture event.
+      const ship = state.player && state.player.ship;
+      if (ship && typeof ship.lastDominantBodyId === 'undefined') {
+        ship.lastDominantBodyId = null;
+      }
+      v = 5;
+    }
+
+    if (v < 6) {
+      // Soft capture now clamps at PERIAPSIS rather than at SOI entry
+      // (see Physics.applySoftCapture), which needs two more fields to
+      // track an in-progress "watching for periapsis" state across
+      // frames. Old saves have neither — default to "not currently
+      // watching anything," which is always safe to resume into.
+      const ship = state.player && state.player.ship;
+      if (ship && typeof ship.captureWatchBodyId === 'undefined') {
+        ship.captureWatchBodyId = null;
+        ship.captureWatchPrevRadialSign = 0;
+      }
+      v = 6;
     }
 
     state.meta.version = CURRENT_VERSION;
