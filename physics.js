@@ -389,7 +389,37 @@ const Physics = (() => {
   const ALIGN_ROTATE_RATE = 2.5;  // radians/sec when auto-aligning prograde/retrograde
   const ALIGN_SNAP_THRESHOLD = 0.02; // radians; close enough to stop auto-align
   const THRUST_ACCEL = 6;         // Mm/s^2 while burn is held
-  const FUEL_BURN_RATE = 4;       // fuel units/sec while burn is held
+  const FUEL_BURN_RATE = 40;      // fuel units/sec while burn is held (10x
+                                   // the original 4 — against a 1000-unit
+                                   // tank this gives roughly 25 seconds of
+                                   // continuous full burn, matching the
+                                   // request that fuel management actually
+                                   // matter rather than being an
+                                   // afterthought).
+
+  // Passive life-support drain: unlike fuel (which only depletes while
+  // actively thrusting), oxygen/supplies/hull tick down continuously with
+  // elapsed SIM time (so they scale with time-warp exactly like
+  // everything else — 10 minutes of travel compressed into 6 real
+  // seconds at 100x still costs the crew 10 minutes' worth of air and
+  // food, not an artificially-preserved amount just because the player
+  // fast-forwarded). Rates are chosen so oxygen and supplies are a real,
+  // fairly fast-moving concern within a single play session, while hull
+  // wear is deliberately much slower — still visibly ticking down if you
+  // watch it, but not an urgent problem the way fuel/oxygen are meant to
+  // be. All three clamp at 0 like fuel already does; there's no
+  // additional failure-state behavior yet (no crew/hull-loss consequence
+  // system exists), matching the current scope of "change the rates,"
+  // not "add new consequences."
+  const OXYGEN_DEPLETION_RATE = 0.15;   // units/sec of sim time (max 100 -> ~11 min to empty)
+  const SUPPLIES_DEPLETION_RATE = 0.08; // units/sec of sim time (max 100 -> ~21 min to empty)
+  const HULL_DEPLETION_RATE = 0.02;     // units/sec of sim time (max 100 -> ~83 min to empty)
+
+  function applyLifeSupportDrain(ship, dt) {
+    ship.oxygen = Math.max(0, ship.oxygen - OXYGEN_DEPLETION_RATE * dt);
+    ship.supplies = Math.max(0, ship.supplies - SUPPLIES_DEPLETION_RATE * dt);
+    ship.hull = Math.max(0, ship.hull - HULL_DEPLETION_RATE * dt);
+  }
 
   // Advance the ship's heading (facing angle) by dt seconds, given a
   // manual rotation input (-1, 0, or +1) and/or an active align target.
@@ -578,6 +608,11 @@ const Physics = (() => {
       }
       stepShip(system, ship, dt);
     }
+
+    applyLifeSupportDrain(ship, dt); // oxygen/supplies/hull tick down
+                                       // regardless of flight state —
+                                       // life support and ship wear don't
+                                       // pause just because you're landed.
 
     state.time.simSeconds += dt;
     state.meta.playTimeSeconds += realSeconds;

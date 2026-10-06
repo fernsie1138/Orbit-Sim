@@ -112,9 +112,9 @@ function assignSoiRadii(bodies) {
 }
 
 /* -------------------------------------------------------------------------
-   Default single star system ("Sol-analog" but fictional so we're not
-   claiming real ephemeris accuracy). Easy to add more systems: just push
-   another entry into GameState.systems[].
+   Default single star system (the Thessaly system — fully fictional, not
+   based on any real star's ephemeris). Easy to add more systems: just
+   push another entry into GameState.systems[].
 ------------------------------------------------------------------------- */
 // Given a desired "sphere of influence" radius (how far a planet's own
 // gravity should meaningfully dominate the star's), solve for the mu the
@@ -133,7 +133,13 @@ function createDefaultSystem() {
 
   const starMu = 1.327e6; // fictional, tuned for nice orbital periods
   bodies.push(makeBody({
-    id: 'sol', name: 'Sol', kind: BodyKind.STAR,
+    // Internal id stays 'sol' deliberately — it's never shown to the
+    // player (only `name` is), and every parentId reference throughout
+    // this file, plus every existing save, points to 'sol'. Renaming the
+    // id too would be a purely-internal, purely-cosmetic change with
+    // real risk (easy to miss a reference) for zero player-visible
+    // benefit, so only the display name actually changes here.
+    id: 'sol', name: 'Thessaly', kind: BodyKind.STAR,
     parentId: null, radius: 60, mu: starMu, color: '#ffe066',
   }));
 
@@ -204,8 +210,8 @@ function createDefaultSystem() {
                            // outermost moon, or a bit further" design
 
   return {
-    id: 'sol-system',
-    name: 'Sol System',
+    id: 'sol-system', // internal id, unchanged for the same reason as the star's — see note above
+    name: 'Thessaly System',
     bodies,
   };
 }

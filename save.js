@@ -11,8 +11,16 @@
    ========================================================================= */
 
 const SaveSystem = (() => {
-  const STORAGE_KEY = 'spacesim.save.v1';
-  const CURRENT_VERSION = 7;
+  const STORAGE_KEY = 'wanderer.save.v1';
+  const OLD_STORAGE_KEY = 'spacesim.save.v1'; // the game's old working name,
+                                                // before it was corrected to
+                                                // Wanderer — kept as a read
+                                                // fallback (see load()) so a
+                                                // save made under the old key
+                                                // isn't silently lost, not
+                                                // because the old name means
+                                                // anything going forward.
+  const CURRENT_VERSION = 8;
 
   function save(state) {
     state.meta.savedAt = Date.now();
@@ -26,11 +34,12 @@ const SaveSystem = (() => {
   }
 
   function hasSave() {
-    return localStorage.getItem(STORAGE_KEY) !== null;
+    return localStorage.getItem(STORAGE_KEY) !== null || localStorage.getItem(OLD_STORAGE_KEY) !== null;
   }
 
   function load() {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    let raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) raw = localStorage.getItem(OLD_STORAGE_KEY); // one-time fallback for a pre-rename save
     if (!raw) return null;
     try {
       const parsed = JSON.parse(raw);
@@ -43,6 +52,7 @@ const SaveSystem = (() => {
 
   function deleteSave() {
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(OLD_STORAGE_KEY); // clear the pre-rename slot too, if present
   }
 
   // Upgrade an older save to the current shape. Add cases as the game
@@ -139,6 +149,22 @@ const SaveSystem = (() => {
       v = 7;
     }
 
+    if (v < 8) {
+      // Renamed the star/system from "Sol"/"Sol System" to "Thessaly"/
+      // "Thessaly System" (cosmetic only — ids are unchanged, see
+      // state.js). A save captured the old names at save-time, so they
+      // won't update on their own; fix them here rather than leaving an
+      // old save stuck showing the old name forever. Only touches a
+      // system whose star is STILL named exactly "Sol" — never a system
+      // the player has since renamed or customized themselves.
+      (state.systems || []).forEach(sys => {
+        if (sys.name === 'Sol System') sys.name = 'Thessaly System';
+        const star = sys.bodies && sys.bodies.find(b => b.id === 'sol');
+        if (star && star.name === 'Sol') star.name = 'Thessaly';
+      });
+      v = 8;
+    }
+
     state.meta.version = CURRENT_VERSION;
     return state;
   }
@@ -152,7 +178,7 @@ const SaveSystem = (() => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `spacesim-save-${new Date().toISOString().slice(0,10)}.json`;
+    a.download = `wanderer-save-${new Date().toISOString().slice(0,10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }

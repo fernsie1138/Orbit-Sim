@@ -56,7 +56,6 @@
   }
   #hud-top-left { top: 0; left: 0; }
   #hud-top-right { top: 0; right: 0; text-align: right; }
-  #hud-bottom-left { bottom: 0; left: 0; }
 
   .stat-row { display: flex; gap: 8px; align-items: center; white-space: nowrap; }
   .stat-label { width: 66px; display: inline-block; opacity: 0.85; }
@@ -69,18 +68,6 @@
   .bar-fill { position: absolute; top: 0; left: 0; bottom: 0; background: var(--green); box-shadow: 0 0 6px var(--green); }
   .bar-fill.warn { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
   .bar-fill.crit { background: #ff3333; box-shadow: 0 0 6px #ff3333; }
-
-  /* ---------- Bottom control bar ---------- */
-  #controls {
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    display: flex;
-    justify-content: center;
-    gap: 10px;
-    padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
-    pointer-events: none;
-  }
-  #controls > * { pointer-events: auto; }
 
   .btn {
     font-family: inherit;
@@ -175,9 +162,86 @@
   .panel .row { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
   .panel-close { margin-top: 14px; display: flex; justify-content: flex-end; }
 
+  /* ---------- Codex ---------- */
+  .codex-panel {
+    width: 520px;
+    max-width: 92vw;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+  }
+  #codex-body { overflow-y: auto; flex: 1; }
+  .codex-group { margin-bottom: 14px; }
+  .codex-group-title {
+    font-size: 11px; letter-spacing: 2px; color: var(--green-dim);
+    text-transform: uppercase; margin: 10px 0 4px;
+  }
+  .codex-entry-btn {
+    display: block; width: 100%; text-align: left;
+    background: none; border: none; color: var(--green);
+    font-family: inherit; font-size: 13px; letter-spacing: 0.5px;
+    padding: 8px 6px; cursor: pointer; border-bottom: 1px solid rgba(51,255,51,0.12);
+  }
+  .codex-entry-btn:active { background: rgba(51,255,51,0.12); }
+  .codex-entry-btn.moon { padding-left: 22px; color: var(--green-dim); font-size: 12px; }
+  .codex-detail h3 { color: var(--green-bright); margin: 0 0 2px; font-size: 16px; letter-spacing: 1px; }
+  .codex-detail .codex-type { color: var(--amber); font-size: 11px; letter-spacing: 1px; margin-bottom: 12px; text-transform: uppercase; }
+  .codex-field { margin-bottom: 10px; }
+  .codex-field-label { font-size: 10px; letter-spacing: 1.5px; color: var(--green-dim); text-transform: uppercase; margin-bottom: 2px; }
+  .codex-field-body { font-size: 13px; line-height: 1.5; }
+  .codex-field-body ul { margin: 2px 0; padding-left: 18px; }
+  .codex-field-body li { margin-bottom: 2px; }
+  .codex-personality { margin-bottom: 6px; }
+  .codex-personality .name { color: var(--green-bright); }
+  .codex-personality .role { color: var(--green-dim); font-size: 11px; }
+
+  /* World-info auto-popup — slides in on the RIGHT when the ship enters
+     orbit around a planet or moon. Deliberately separate from the Codex
+     overlay (not modal, doesn't block the rest of the screen) since it's
+     meant to appear automatically mid-flight without stopping the player
+     from doing anything else. */
+  #world-info-panel {
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: 280px;
+    max-width: 78vw;
+    background: rgba(0,16,0,0.95);
+    border-left: 1px solid var(--green);
+    box-shadow: -8px 0 24px rgba(0,0,0,0.5);
+    z-index: 15;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.25s ease-out;
+    pointer-events: none;
+  }
+  #world-info-panel.visible { transform: translateX(0); pointer-events: auto; }
+  #world-info-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 14px 10px; border-bottom: 1px solid var(--green-dim);
+  }
+  #world-info-header h3 { margin: 0; color: var(--green-bright); font-size: 14px; letter-spacing: 1px; }
+  #btn-close-world-info {
+    background: none; border: 1px solid var(--green-dim); color: var(--green);
+    font-family: inherit; padding: 4px 9px; cursor: pointer; border-radius: 4px;
+  }
+  #world-info-body {
+    padding: 12px 14px; overflow-y: auto; flex: 1;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+
   #menu-btn {
-    position: absolute; top: 8px; right: 8px;
-    pointer-events: auto;
+    /* Now laid out as the first item inside #hud-top-right (normal
+       document flow, not its own absolutely-positioned element) so it
+       can never again end up stacked directly on top of the clock/warp/
+       build text underneath it — both used to anchor independently to
+       the same top-right corner, which is exactly what caused them to
+       visibly overlap. */
+    margin-bottom: 6px;
+    pointer-events: auto; /* this one button stays clickable even though
+                              its parent .hud-corner otherwise disables
+                              pointer events, so the dim HUD text never
+                              blocks taps on the map underneath it */
   }
 
   .scanline-overlay {
@@ -201,8 +265,17 @@
 
   #toast {
     position: absolute;
-    top: 44px; left: 50%;
+    /* Clear of BOTH top corners' HUD text, not just a guess at the
+       shortest message — hud-top-right in particular grew taller once
+       the menu button moved inside it (button + 3 text lines), and a
+       longer toast like "LAUNCHED — IN ORBIT AROUND MERIDIAN" is wide
+       enough to reach both corners at once when horizontally centered,
+       so this needed real vertical clearance, not a horizontal dodge
+       that would only work for short messages. */
+    top: 120px; left: 50%;
     transform: translateX(-50%);
+    max-width: 80%;
+    text-align: center;
     font-size: 12px;
     padding: 6px 14px;
     border: 1px solid var(--green-dim);
@@ -225,22 +298,18 @@
       <div id="hud-refbody">TRACKING: —</div>
       <div id="hud-speed">V: 0.00 km/s</div>
       <div id="hud-orbit">AP: — PE: —</div>
-    </div>
-
-    <div class="hud-corner" id="hud-top-right">
-      <div id="hud-clock">T+ 00:00:00</div>
-      <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 1</div>
-    </div>
-
-    <div class="hud-corner" id="hud-bottom-left">
-      <div class="stat-row"><span class="stat-label">FUEL</span><div class="bar"><div class="bar-fill" id="bar-fuel"></div></div></div>
+      <div class="stat-row" style="margin-top: 6px;"><span class="stat-label">FUEL</span><div class="bar"><div class="bar-fill" id="bar-fuel"></div></div></div>
       <div class="stat-row"><span class="stat-label">OXYGEN</span><div class="bar"><div class="bar-fill" id="bar-oxygen"></div></div></div>
       <div class="stat-row"><span class="stat-label">SUPPLY</span><div class="bar"><div class="bar-fill" id="bar-supplies"></div></div></div>
       <div class="stat-row"><span class="stat-label">HULL</span><div class="bar"><div class="bar-fill" id="bar-hull"></div></div></div>
     </div>
 
-    <button class="btn small" id="menu-btn">≡ MENU</button>
+    <div class="hud-corner" id="hud-top-right">
+      <button class="btn small" id="menu-btn">≡ MENU</button>
+      <div id="hud-clock">T+ 00:00:00</div>
+      <div id="hud-warp">RUNNING</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 2</div>
+    </div>
 
     <div id="left-controls">
       <button class="btn small" id="btn-pause">⏸ PAUSE</button>
@@ -273,6 +342,7 @@
       <div class="panel">
         <h2>WANDERER CONSOLE</h2>
         <div class="row">
+          <button class="btn" id="btn-codex">📖 CODEX</button>
           <button class="btn primary" id="btn-save">SAVE GAME</button>
           <button class="btn" id="btn-load">LOAD GAME</button>
           <button class="btn" id="btn-export">EXPORT SAVE FILE</button>
@@ -285,11 +355,35 @@
       </div>
     </div>
 
+    <!-- Codex: directory of every planet/moon's lore. List view and
+         detail view share one panel and are toggled via JS rather than
+         being two separate overlays, so "back" just swaps content
+         in place rather than navigating between stacked overlays. -->
+    <div class="overlay" id="codex-overlay">
+      <div class="panel codex-panel">
+        <h2 id="codex-title">CODEX</h2>
+        <div id="codex-body"></div>
+        <div class="panel-close"><button class="btn" id="btn-close-codex">CLOSE</button></div>
+      </div>
+    </div>
+
+    <!-- World-info auto-popup: shown automatically on arrival at a
+         planet/moon (see checkWorldArrival in the script below), and
+         also reachable by tapping an entry in the Codex. -->
+    <div id="world-info-panel">
+      <div id="world-info-header">
+        <h3 id="world-info-title">—</h3>
+        <button id="btn-close-world-info">✕</button>
+      </div>
+      <div id="world-info-body"></div>
+    </div>
+
     <div class="scanline-overlay"></div>
   </div>
 </div>
 
 <script src="state.js"></script>
+<script src="codex.js"></script>
 <script src="physics.js"></script>
 <script src="save.js"></script>
 <script src="starmap.js"></script>
@@ -497,6 +591,132 @@ const menuOverlay = document.getElementById('menu-overlay');
 document.getElementById('menu-btn').onclick = () => menuOverlay.classList.add('visible');
 document.getElementById('btn-close-menu').onclick = () => menuOverlay.classList.remove('visible');
 
+// ---- Codex (directory) + world-info auto-popup ----
+// Both share one rendering function (renderCodexEntryHtml) so the Codex
+// directory's detail view and the on-arrival popup always show exactly
+// the same content — there's only one "truth" for what a world's lore
+// looks like, just two different places it can be read.
+function renderCodexEntryHtml(body, entry, opts) {
+  opts = opts || {};
+  if (!entry) return '<div class="codex-field-body"><em>No data available.</em></div>';
+  const field = (label, html) => `<div class="codex-field"><div class="codex-field-label">${label}</div><div class="codex-field-body">${html}</div></div>`;
+  const list = items => (items && items.length) ? ('<ul>' + items.map(i => `<li>${i}</li>`).join('') + '</ul>') : '<em>None known.</em>';
+  let html = '';
+  if (opts.showName !== false) html += `<h3>${body.name.toUpperCase()}</h3>`;
+  html += `<div class="codex-type">${entry.type}</div>`;
+  html += field('Terrain', entry.terrain);
+  html += field('Habitability', entry.habitability);
+  html += field('Population', entry.population);
+  html += field('Government', entry.government);
+  html += field('History', entry.history);
+  html += field('Current News', list(entry.news));
+  html += field('Legal Trade', list(entry.commoditiesLegal));
+  html += field('Illegal Trade', list(entry.commoditiesIllegal));
+  if (entry.personalities && entry.personalities.length) {
+    html += field('Notable Personalities', entry.personalities.map(p =>
+      `<div class="codex-personality"><span class="name">${p.name}</span> — <span class="role">${p.role}</span><br>${p.blurb}</div>`
+    ).join(''));
+  }
+  return html;
+}
+
+function renderCodexList() {
+  const system = getCurrentSystem(gameState);
+  let html = '';
+  Codex.listByPlanet(system).forEach(g => {
+    html += '<div class="codex-group">';
+    html += `<button class="codex-entry-btn" data-body-id="${g.body.id}">${g.body.name.toUpperCase()}</button>`;
+    g.moons.forEach(m => {
+      html += `<button class="codex-entry-btn moon" data-body-id="${m.id}">${m.name}</button>`;
+    });
+    html += '</div>';
+  });
+  return html;
+}
+
+let codexView = { mode: 'list', bodyId: null };
+function renderCodexBody() {
+  const codexBody = document.getElementById('codex-body');
+  if (codexView.mode === 'detail' && codexView.bodyId) {
+    const system = getCurrentSystem(gameState);
+    const body = Physics.findBody(system, codexView.bodyId);
+    const entry = Codex.getEntry(codexView.bodyId);
+    codexBody.innerHTML = '<button class="btn small" id="btn-codex-back" style="margin-bottom:10px;">← DIRECTORY</button>'
+      + '<div class="codex-detail">' + renderCodexEntryHtml(body, entry) + '</div>';
+  } else {
+    codexBody.innerHTML = renderCodexList();
+  }
+}
+// Event delegation on the container rather than re-binding handlers after
+// every innerHTML replacement (simpler and can't silently stop working if
+// a future render forgets to re-bind).
+document.getElementById('codex-body').addEventListener('click', e => {
+  const entryBtn = e.target.closest('.codex-entry-btn');
+  if (entryBtn) {
+    codexView = { mode: 'detail', bodyId: entryBtn.dataset.bodyId };
+    renderCodexBody();
+    return;
+  }
+  if (e.target.id === 'btn-codex-back') {
+    codexView = { mode: 'list', bodyId: null };
+    renderCodexBody();
+  }
+});
+document.getElementById('btn-codex').addEventListener('click', () => {
+  codexView = { mode: 'list', bodyId: null };
+  renderCodexBody();
+  menuOverlay.classList.remove('visible');
+  document.getElementById('codex-overlay').classList.add('visible');
+});
+document.getElementById('btn-close-codex').addEventListener('click', () => {
+  document.getElementById('codex-overlay').classList.remove('visible');
+});
+
+// World-info auto-popup: shown when the ship's dominant body (see
+// Physics.dominantBody) changes to a MORE SPECIFIC body than before —
+// i.e. arriving at a planet/moon, the same "depth increased" signal
+// Physics.applySoftCapture uses internally for its own, unrelated
+// purpose (deciding when to soft-capture). Kept as fully separate,
+// UI-only state here rather than reusing ship.lastDominantBodyId
+// directly, so this notification concern never gets entangled with that
+// physics-internal bookkeeping.
+const worldInfoPanel = document.getElementById('world-info-panel');
+function openWorldInfo(bodyId) {
+  const system = getCurrentSystem(gameState);
+  const body = Physics.findBody(system, bodyId);
+  const entry = Codex.getEntry(bodyId);
+  if (!body || !entry) return;
+  document.getElementById('world-info-title').textContent = body.name.toUpperCase();
+  document.getElementById('world-info-body').innerHTML = renderCodexEntryHtml(body, entry, { showName: false });
+  worldInfoPanel.classList.add('visible');
+}
+document.getElementById('btn-close-world-info').addEventListener('click', () => {
+  worldInfoPanel.classList.remove('visible');
+});
+
+// Initialized from the actual starting ship state (not null) so the very
+// first frame after a fresh page load doesn't mistake "ship already
+// orbiting Aldrin at game start" for a brand-new arrival — the same class
+// of fix already applied to ship.lastDominantBodyId itself in state.js.
+// Also re-synced in syncControlButtonsToState for every later load/reset.
+let shownWorldPopupFor = gameState.player.ship.lastDominantBodyId;
+function checkWorldArrival() {
+  if (gameState.player.location === 'landed') return; // already settled; nothing new to announce
+  const system = getCurrentSystem(gameState);
+  const ship = gameState.player.ship;
+  const positions = Physics.allWorldPositions(system);
+  const dom = Physics.dominantBody(system, ship.x, ship.y, positions);
+  if (!dom || dom.id === shownWorldPopupFor) return;
+  const prevBody = Physics.findBody(system, shownWorldPopupFor);
+  const prevDepth = prevBody ? Physics.bodyDepth(system, prevBody) : 0;
+  const newDepth = Physics.bodyDepth(system, dom);
+  const arrived = newDepth > prevDepth; // deeper SOI = arrival; shallower = departure, no popup
+  shownWorldPopupFor = dom.id;
+  if (arrived && (dom.kind === BodyKind.PLANET || dom.kind === BodyKind.MOON) && Codex.hasEntry(dom.id)) {
+    openWorldInfo(dom.id);
+  }
+}
+
 // Whenever gameState is replaced wholesale (load/new game/import), the
 // control buttons need to resync their visual state to match — otherwise
 // e.g. the pause button could still say "RESUME" after loading a save
@@ -514,6 +734,11 @@ function syncControlButtonsToState() {
   btnBurn.classList.remove('active');
   setFlightControlsEnabled(gameState.player.location !== 'landed');
   updateLandLaunchControl();
+  // Re-sync to wherever the (newly loaded/reset) ship actually is, so a
+  // load/new-game/reset never spuriously re-shows the arrival popup for
+  // a world the player was already at before this reset happened.
+  shownWorldPopupFor = gameState.player.ship.lastDominantBodyId;
+  worldInfoPanel.classList.remove('visible');
 }
 
 document.getElementById('btn-save').onclick = () => {
@@ -640,6 +865,7 @@ function loop(now) {
   StarMap.draw(gameState);
   updateHud();
   updateLandLaunchControl();
+  checkWorldArrival();
 
   requestAnimationFrame(loop);
 }
