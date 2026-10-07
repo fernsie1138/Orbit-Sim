@@ -310,7 +310,7 @@
       <button class="btn small" id="menu-btn">≡ MENU</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 4</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 5</div>
     </div>
 
     <div id="left-controls">
@@ -334,7 +334,7 @@
         <button class="btn" id="btn-align-prograde" title="Align Prograde">PRO<br>GRADE</button>
         <button class="btn" id="btn-align-retrograde" title="Align Retrograde">RETRO<br>GRADE</button>
         <button class="btn wide" id="btn-land-launch" title="Land / Launch" disabled>LAND</button>
-        <button class="btn wide" id="btn-market" title="Market" disabled>MARKET</button>
+        <button class="btn wide" id="btn-landing-services" title="Landing Services" disabled>LANDING SERVICES</button>
       </div>
     </div>
 
@@ -389,12 +389,44 @@
          / the MARKET control, which is disabled unless player.location
          is 'landed'. Prices come from Economy.priceAt, keyed by whatever
          body the ship is currently landed on. -->
-    <div class="overlay" id="market-overlay">
+    <!-- Landing Services: hub reached while landed, replacing the old
+         direct-to-Market button. Routes to Ship Services (the old
+         Market — restocking consumables), Missions, and Repair. -->
+    <div class="overlay" id="landing-services-overlay">
+      <div class="panel">
+        <h2 id="landing-services-title">LANDING SERVICES</h2>
+        <div class="row">
+          <button class="btn" id="btn-open-ship-services">⛽ SHIP SERVICES</button>
+          <button class="btn" id="btn-open-missions">📋 MISSIONS</button>
+          <button class="btn" id="btn-open-repair">🔧 REPAIR</button>
+        </div>
+        <div class="panel-close"><button class="btn" id="btn-close-landing-services">CLOSE</button></div>
+      </div>
+    </div>
+
+    <div class="overlay" id="ship-services-overlay">
       <div class="panel codex-panel">
-        <h2 id="market-title">MARKET</h2>
-        <div id="market-credits" style="margin-bottom:10px;font-size:13px;color:var(--green-bright);">CREDITS: 10,000</div>
-        <div id="market-body"></div>
-        <div class="panel-close"><button class="btn" id="btn-close-market">CLOSE</button></div>
+        <h2 id="ship-services-title">SHIP SERVICES</h2>
+        <div id="ship-services-credits" style="margin-bottom:10px;font-size:13px;color:var(--green-bright);">CREDITS: 10,000</div>
+        <div id="ship-services-body"></div>
+        <div class="panel-close"><button class="btn" id="btn-back-ship-services">← LANDING SERVICES</button></div>
+      </div>
+    </div>
+
+    <div class="overlay" id="repair-overlay">
+      <div class="panel codex-panel">
+        <h2 id="repair-title">REPAIR</h2>
+        <div id="repair-credits" style="margin-bottom:10px;font-size:13px;color:var(--green-bright);">CREDITS: 10,000</div>
+        <div id="repair-body"></div>
+        <div class="panel-close"><button class="btn" id="btn-back-repair">← LANDING SERVICES</button></div>
+      </div>
+    </div>
+
+    <div class="overlay" id="missions-overlay">
+      <div class="panel codex-panel">
+        <h2>MISSIONS</h2>
+        <div id="missions-body"></div>
+        <div class="panel-close"><button class="btn" id="btn-back-missions">← LANDING SERVICES</button></div>
       </div>
     </div>
 
@@ -427,6 +459,7 @@
 <script src="state.js"></script>
 <script src="codex.js"></script>
 <script src="economy.js"></script>
+<script src="missions.js"></script>
 <script src="physics.js"></script>
 <script src="save.js"></script>
 <script src="starmap.js"></script>
@@ -575,10 +608,10 @@ function updateLandLaunchControl() {
       btnLandLaunch.dataset.landableId = '';
     }
   }
-  // Market is only ever reachable while actually landed — there's no
-  // "remote ordering" concept, you have to be docked/grounded somewhere
-  // to restock from it.
-  document.getElementById('btn-market').disabled = gameState.player.location !== 'landed';
+  // Landing Services is only ever reachable while actually landed —
+  // there's no "remote ordering" concept, you have to be docked/
+  // grounded somewhere to restock, repair, or pick up local work.
+  document.getElementById('btn-landing-services').disabled = gameState.player.location !== 'landed';
 }
 
 btnLandLaunch.addEventListener('click', () => {
@@ -595,7 +628,13 @@ btnLandLaunch.addEventListener('click', () => {
     if (!body) return; // button should be disabled in this case, but don't act on stale data
     Physics.land(gameState, body);
     setFlightControlsEnabled(false);
-    showToast(`LANDED AT ${body.name.toUpperCase()}`);
+    const missionResult = checkMissionCompletionOnLanding(body.id);
+    if (missionResult.completedCount > 0) {
+      const plural = missionResult.completedCount > 1 ? 'S' : '';
+      showToast(`LANDED AT ${body.name.toUpperCase()} — ${missionResult.completedCount} MISSION${plural} COMPLETE (+${formatCredits(missionResult.totalPayment)} CR)`);
+    } else {
+      showToast(`LANDED AT ${body.name.toUpperCase()}`);
+    }
   }
   updateLandLaunchControl();
 });
@@ -787,16 +826,37 @@ document.getElementById('btn-close-pilot').addEventListener('click', () => {
   pilotOverlay.classList.remove('visible');
 });
 
-// ---- Market (restock consumables while landed) ----
+// ---- Landing Services hub (reached while landed) ----
+// Routes to three sub-screens: Ship Services (restocking — the old
+// Market), Missions, and Repair. Each sub-screen's bottom button reads
+// "LANDING SERVICES" and returns to this hub rather than exiting
+// straight back to flight, so the player can do several things in one
+// stop (restock AND pick up a job AND repair) without re-opening the
+// top-level button each time.
+function openLandingServicesHub() {
+  const system = getCurrentSystem(gameState);
+  const body = Physics.findBody(system, gameState.player.landedBodyId);
+  document.getElementById('landing-services-title').textContent = body ? `LANDING SERVICES — ${body.name.toUpperCase()}` : 'LANDING SERVICES';
+  document.getElementById('landing-services-overlay').classList.add('visible');
+}
+document.getElementById('btn-landing-services').addEventListener('click', () => {
+  if (gameState.player.location !== 'landed') return; // button should already be disabled in this case
+  openLandingServicesHub();
+});
+document.getElementById('btn-close-landing-services').addEventListener('click', () => {
+  document.getElementById('landing-services-overlay').classList.remove('visible');
+});
+
+// ---- Ship Services (restock consumables — formerly the standalone Market) ----
 const RESOURCE_LABELS = { fuel: 'FUEL', oxygen: 'OXYGEN', supplies: 'SUPPLIES' };
-function renderMarket() {
+function renderShipServices() {
   const system = getCurrentSystem(gameState);
   const bodyId = gameState.player.landedBodyId;
   const body = Physics.findBody(system, bodyId);
   const ship = gameState.player.ship;
 
-  document.getElementById('market-title').textContent = body ? `MARKET — ${body.name.toUpperCase()}` : 'MARKET';
-  document.getElementById('market-credits').textContent = `CREDITS: ${formatCredits(gameState.player.credits)}`;
+  document.getElementById('ship-services-title').textContent = body ? `SHIP SERVICES — ${body.name.toUpperCase()}` : 'SHIP SERVICES';
+  document.getElementById('ship-services-credits').textContent = `CREDITS: ${formatCredits(gameState.player.credits)}`;
 
   let html = '';
   ['fuel', 'oxygen', 'supplies'].forEach(key => {
@@ -816,7 +876,7 @@ function renderMarket() {
       </div>
     </div>`;
   });
-  document.getElementById('market-body').innerHTML = html;
+  document.getElementById('ship-services-body').innerHTML = html;
 }
 
 function buyResource(key) {
@@ -832,21 +892,186 @@ function buyResource(key) {
   const cost = unitsToBuy * price;
   ship[key] = Math.min(ship[key + 'Max'], ship[key] + unitsToBuy);
   gameState.player.credits = Math.max(0, gameState.player.credits - cost);
-  renderMarket();
+  renderShipServices();
   updateHud();
 }
-document.getElementById('market-body').addEventListener('click', e => {
+document.getElementById('ship-services-body').addEventListener('click', e => {
   const btn = e.target.closest('[data-buy]');
   if (btn) buyResource(btn.dataset.buy);
 });
-document.getElementById('btn-market').addEventListener('click', () => {
-  if (gameState.player.location !== 'landed') return; // button should already be disabled in this case
-  renderMarket();
-  document.getElementById('market-overlay').classList.add('visible');
+document.getElementById('btn-open-ship-services').addEventListener('click', () => {
+  document.getElementById('landing-services-overlay').classList.remove('visible');
+  renderShipServices();
+  document.getElementById('ship-services-overlay').classList.add('visible');
 });
-document.getElementById('btn-close-market').addEventListener('click', () => {
-  document.getElementById('market-overlay').classList.remove('visible');
+document.getElementById('btn-back-ship-services').addEventListener('click', () => {
+  document.getElementById('ship-services-overlay').classList.remove('visible');
+  openLandingServicesHub();
 });
+
+// ---- Repair (restore Engineering systems — engine/reactor/hull/nav/cooler) ----
+function renderRepair() {
+  const system = getCurrentSystem(gameState);
+  const bodyId = gameState.player.landedBodyId;
+  const body = Physics.findBody(system, bodyId);
+  const ship = gameState.player.ship;
+  const price = Economy.repairPriceAt(bodyId);
+
+  document.getElementById('repair-title').textContent = body ? `REPAIR — ${body.name.toUpperCase()}` : 'REPAIR';
+  document.getElementById('repair-credits').textContent = `CREDITS: ${formatCredits(gameState.player.credits)}`;
+
+  let html = '';
+  ENGINEERING_ORDER.forEach(key => {
+    const current = ship[key];
+    const max = ship[key + 'Max'];
+    const needed = Math.max(0, max - current);
+    const fullCost = needed * price;
+    const affordableUnits = gameState.player.credits / price;
+    const canAffordFull = affordableUnits >= needed;
+    html += `<div class="codex-field">
+      <div class="codex-field-label">${ENGINEERING_LABELS[key]} — ${Math.round(current)}/${Math.round(max)} — ${price.toFixed(2)} CR/POINT</div>
+      <div class="codex-field-body">
+        <button class="btn small" data-repair="${key}" ${needed <= 0 ? 'disabled' : ''}>
+          ${needed <= 0 ? 'FULL' : (canAffordFull ? `REPAIR (${fullCost.toFixed(0)} CR)` : 'REPAIR (PARTIAL — LOW CREDITS)')}
+        </button>
+      </div>
+    </div>`;
+  });
+  document.getElementById('repair-body').innerHTML = html;
+}
+
+function repairSystem(key) {
+  const ship = gameState.player.ship;
+  const bodyId = gameState.player.landedBodyId;
+  const price = Economy.repairPriceAt(bodyId);
+  if (!price || price <= 0) return;
+  const needed = ship[key + 'Max'] - ship[key];
+  if (needed <= 0) return;
+  const affordablePoints = gameState.player.credits / price;
+  const pointsToRepair = Math.min(needed, affordablePoints);
+  if (pointsToRepair <= 0) return;
+  const cost = pointsToRepair * price;
+  ship[key] = Math.min(ship[key + 'Max'], ship[key] + pointsToRepair);
+  gameState.player.credits = Math.max(0, gameState.player.credits - cost);
+  renderRepair();
+  updateHud();
+}
+document.getElementById('repair-body').addEventListener('click', e => {
+  const btn = e.target.closest('[data-repair]');
+  if (btn) repairSystem(btn.dataset.repair);
+});
+document.getElementById('btn-open-repair').addEventListener('click', () => {
+  document.getElementById('landing-services-overlay').classList.remove('visible');
+  renderRepair();
+  document.getElementById('repair-overlay').classList.add('visible');
+});
+document.getElementById('btn-back-repair').addEventListener('click', () => {
+  document.getElementById('repair-overlay').classList.remove('visible');
+  openLandingServicesHub();
+});
+
+// ---- Missions ----
+// Offered missions are generated lazily per body (the first time the
+// mission board is opened there) and cached in gameState.missions, so
+// the same body doesn't offer a totally different job list every time
+// you dock — see missions.js for the generation logic itself.
+function ensureMissionsGeneratedFor(bodyId) {
+  if (gameState.missions.offeredByBody[bodyId]) return; // already generated
+  const system = getCurrentSystem(gameState);
+  const result = Missions.generateMissionsForBody(system, bodyId, gameState.missions.nextId);
+  gameState.missions.offeredByBody[bodyId] = result.missions;
+  gameState.missions.nextId = result.nextId;
+}
+
+function renderMissions() {
+  const landed = gameState.player.location === 'landed';
+  const bodyId = gameState.player.landedBodyId;
+  let html = '';
+
+  if (landed) {
+    ensureMissionsGeneratedFor(bodyId);
+    const offered = gameState.missions.offeredByBody[bodyId] || [];
+    html += '<div class="codex-group-title">AVAILABLE HERE</div>';
+    if (offered.length === 0) {
+      html += '<div class="codex-field-body"><em>No jobs currently posted at this location.</em></div>';
+    } else {
+      offered.forEach(m => {
+        html += `<div class="codex-field">
+          <div class="codex-field-label">${m.type.toUpperCase()} — ${formatCredits(m.payment)} CR</div>
+          <div class="codex-field-body">${m.description}
+            <br><button class="btn small" data-accept="${m.id}" style="margin-top:6px;">ACCEPT</button>
+          </div>
+        </div>`;
+      });
+    }
+  }
+
+  html += '<div class="codex-group-title" style="margin-top:14px;">ACTIVE MISSIONS</div>';
+  if (gameState.missions.active.length === 0) {
+    html += '<div class="codex-field-body"><em>No missions currently in progress.</em></div>';
+  } else {
+    const system = getCurrentSystem(gameState);
+    gameState.missions.active.forEach(m => {
+      const destBody = Physics.findBody(system, m.destinationId);
+      html += `<div class="codex-field">
+        <div class="codex-field-label">${m.type.toUpperCase()} — ${formatCredits(m.payment)} CR</div>
+        <div class="codex-field-body">${m.description}<br>Deliver to: <strong>${destBody ? destBody.name.toUpperCase() : '—'}</strong></div>
+      </div>`;
+    });
+  }
+
+  document.getElementById('missions-body').innerHTML = html;
+}
+
+function acceptMission(missionId) {
+  const bodyId = gameState.player.landedBodyId;
+  const offered = gameState.missions.offeredByBody[bodyId];
+  if (!offered) return;
+  const idx = offered.findIndex(m => m.id === missionId);
+  if (idx === -1) return;
+  const mission = offered.splice(idx, 1)[0];
+  gameState.missions.active.push(mission);
+  showToast(`MISSION ACCEPTED: +${formatCredits(mission.payment)} CR ON DELIVERY`);
+  renderMissions();
+}
+document.getElementById('missions-body').addEventListener('click', e => {
+  const btn = e.target.closest('[data-accept]');
+  if (btn) acceptMission(btn.dataset.accept);
+});
+document.getElementById('btn-open-missions').addEventListener('click', () => {
+  document.getElementById('landing-services-overlay').classList.remove('visible');
+  renderMissions();
+  document.getElementById('missions-overlay').classList.add('visible');
+});
+document.getElementById('btn-back-missions').addEventListener('click', () => {
+  document.getElementById('missions-overlay').classList.remove('visible');
+  openLandingServicesHub();
+});
+
+// Checks active missions for any whose destination matches the body the
+// ship just landed at, completing (and paying out) every match — called
+// right after Physics.land() in the LAND button handler below. A single
+// landing could complete more than one mission if several active jobs
+// happen to share the same destination. Returns a summary rather than
+// showing its own toast, since showToast only holds ONE message at a
+// time — calling it here AND again right after for "LANDED AT X" would
+// silently drop whichever one fired first; the caller combines both
+// into a single toast instead.
+function checkMissionCompletionOnLanding(bodyId) {
+  const stillActive = [];
+  let completedCount = 0, totalPayment = 0;
+  gameState.missions.active.forEach(m => {
+    if (m.destinationId === bodyId) {
+      gameState.player.credits += m.payment;
+      completedCount++;
+      totalPayment += m.payment;
+    } else {
+      stillActive.push(m);
+    }
+  });
+  gameState.missions.active = stillActive;
+  return { completedCount, totalPayment };
+}
 
 // ---- Engineering (five-system condition readout, replacing the old
 // standalone hull bar) ----

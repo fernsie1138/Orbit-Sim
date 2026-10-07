@@ -397,6 +397,23 @@ function createNewGameState() {
                             // default, since attitude-based flying is much
                             // easier to follow with the ship kept in view.
     },
+    missions: {
+      offeredByBody: {}, // { bodyId: [mission, ...] } — generated lazily
+                          // the first time the player opens the mission
+                          // board at that body (see Missions.
+                          // generateMissionsForBody), then cached here so
+                          // the same body doesn't offer a totally
+                          // different job list every time you dock.
+                          // Accepting a mission removes it from here.
+      active: [],         // [mission, ...] — accepted, in progress.
+                          // Completed automatically on landing at the
+                          // mission's destinationId (see the land button
+                          // handler in index.html).
+      nextId: 1,           // simple incrementing counter for unique
+                          // mission ids — avoids any timestamp-collision
+                          // edge case from generating several missions
+                          // in the same millisecond.
+    },
     flags: {},
   };
 }

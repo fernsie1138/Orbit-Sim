@@ -20,7 +20,7 @@ const SaveSystem = (() => {
                                                 // isn't silently lost, not
                                                 // because the old name means
                                                 // anything going forward.
-  const CURRENT_VERSION = 10;
+  const CURRENT_VERSION = 11;
 
   function save(state) {
     state.meta.savedAt = Date.now();
@@ -192,6 +192,17 @@ const SaveSystem = (() => {
         ship.cooler = 100; ship.coolerMax = 100;
       }
       v = 10;
+    }
+
+    if (v < 11) {
+      // Added missions (state.missions). Old saves have no such field —
+      // default to an empty job board everywhere and no active
+      // missions, which is always a safe, sensible starting point
+      // regardless of where an existing save left off.
+      if (typeof state.missions === 'undefined') {
+        state.missions = { offeredByBody: {}, active: [], nextId: 1 };
+      }
+      v = 11;
     }
 
     state.meta.version = CURRENT_VERSION;

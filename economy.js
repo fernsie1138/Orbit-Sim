@@ -52,6 +52,15 @@ const ECONOMY_MULTIPLIERS = {
   'sol-station':  { fuel: 1.1, oxygen: 1.1, supplies: 1.0 },
 };
 
+// Repair cost: flat per point of Engineering-system condition restored
+// (engine/reactor/hull/nav/cooler — see physics.js's applyEngineeringWear
+// and the REPAIR screen in index.html), the same everywhere for now
+// rather than varying by world like the consumables do. Kept as a
+// function (not a bare constant) so a future per-world repair-cost
+// multiplier — matching how fuel/oxygen/supplies already work — could
+// be added later without changing any call site.
+const REPAIR_COST_PER_POINT = 5;
+
 const Economy = (() => {
   function getPriceMultipliers(bodyId) {
     return ECONOMY_MULTIPLIERS[bodyId] || { fuel: 1.0, oxygen: 1.0, supplies: 1.0 };
@@ -66,5 +75,9 @@ const Economy = (() => {
     return Math.round(base * mult * 100) / 100;
   }
 
-  return { getPriceMultipliers, priceAt, BASE_PRICE: ECONOMY_BASE_PRICE };
+  function repairPriceAt(bodyId) {
+    return REPAIR_COST_PER_POINT; // flat for now; bodyId reserved for future use
+  }
+
+  return { getPriceMultipliers, priceAt, repairPriceAt, BASE_PRICE: ECONOMY_BASE_PRICE };
 })();

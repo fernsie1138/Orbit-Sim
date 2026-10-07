@@ -422,13 +422,18 @@ const Physics = (() => {
 
   // Engineering wear: the five ship systems (engine, reactor, hull, nav,
   // cooler — see the ENGINEERING screen, which replaced the old simple
-  // hull bar) degrade randomly and slowly over a journey, rather than a
-  // smooth, predictable drain — occasional small wear events, each
-  // landing on ONE randomly chosen system. The combined expected wear
-  // rate across all five averages to 10% of the old hull-only rate
-  // (0.02/sec), genuinely minor: roughly one small wear event every
-  // ~15-20 minutes of sim time on average, not something that demands
-  // constant attention.
+  // hull bar) degrade randomly over a journey, rather than a smooth,
+  // predictable drain — occasional small wear events, each landing on
+  // ONE randomly chosen system. Only accrues while actually FLYING (see
+  // the call site in step() — skipped entirely while landed), matching
+  // the idea that it's active spaceflight stressing the ship, not time
+  // passing in general, and giving the new Landing Services REPAIR
+  // function somewhere to matter. The rate was bumped 5x from its
+  // original tuning specifically for this: now that it's flying-only
+  // (losing the "always-on, including while landed" exposure the
+  // original rate was calibrated against) and meant to be a genuine,
+  // noticeable-over-a-session mechanic worth repairing, the slower
+  // original rate would barely register.
   //
   // Uses an EXPECTED-VALUE approach (guaranteed whole events, plus one
   // probabilistic check for the fractional remainder) rather than a
@@ -441,7 +446,7 @@ const Physics = (() => {
   // wear events should actually have happened. This keeps the LONG-RUN
   // AVERAGE rate correct at any warp speed, the same principle already
   // used for the game's time-warp-aware consumable drains.
-  const ENGINEERING_WEAR_EVENT_RATE = 0.001; // events/sec of sim time
+  const ENGINEERING_WEAR_EVENT_RATE = 0.005; // events/sec of sim time WHILE FLYING (5x the original 0.001)
   const ENGINEERING_SYSTEMS = ['engine', 'reactor', 'hull', 'nav', 'cooler'];
 
   function applyEngineeringWear(ship, dt) {
@@ -451,7 +456,7 @@ const Physics = (() => {
     if (Math.random() < remainder) events += 1;
     for (let i = 0; i < events; i++) {
       const system = ENGINEERING_SYSTEMS[Math.floor(Math.random() * ENGINEERING_SYSTEMS.length)];
-      const wearAmount = 1 + Math.random() * 2; // 1-3 points, averaging ~2 (so eventRate*2 ≈ 0.002/sec combined, matching 10% of the old 0.02/sec hull rate)
+      const wearAmount = 1 + Math.random() * 2; // 1-3 points, averaging ~2
       ship[system] = Math.max(1, ship[system] - wearAmount); // floor at 1, never fully 0 — see state.js: these represent wear/condition, not a consumable that runs out
     }
   }
@@ -644,11 +649,16 @@ const Physics = (() => {
       stepShip(system, ship, dt);
     }
 
-    applyLifeSupportDrain(ship, dt);  // oxygen/supplies tick down
-    applyEngineeringWear(ship, dt);   // engine/reactor/hull/nav/cooler wear randomly
-                                       // — both regardless of flight state: life
-                                       // support and ship wear don't pause just
-                                       // because you're landed.
+    applyLifeSupportDrain(ship, dt); // oxygen/supplies tick down regardless of
+                                       // flight state — life support doesn't
+                                       // pause just because you're landed.
+    if (state.player.location !== 'landed') {
+      applyEngineeringWear(ship, dt); // engine/reactor/hull/nav/cooler wear
+                                       // randomly — FLYING ONLY (see that
+                                       // function's comment for why): a
+                                       // landed, parked ship isn't being
+                                       // stressed the way active flight does.
+    }
 
     state.time.simSeconds += dt;
     state.meta.playTimeSeconds += realSeconds;
