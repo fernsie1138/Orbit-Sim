@@ -392,10 +392,17 @@ function createNewGameState() {
     },
     camera: {
       x: 0, y: 0, zoom: 1, // filled in properly by starmap.js on first run
-      followShip: true,    // when true, camera re-centers on the ship every
-                            // frame instead of being freely panned — the
-                            // default, since attitude-based flying is much
-                            // easier to follow with the ship kept in view.
+      followTarget: 'ship', // 'ship' | a body id | null — when set, the
+                            // camera re-centers on that target every
+                            // frame instead of being freely panned (see
+                            // the FOLLOW menu in index.html, which lets
+                            // the player lock onto the ship or any body
+                            // in the system, not just the ship). null
+                            // means free pan — the same state manual
+                            // dragging already switches to. Defaults to
+                            // 'ship', since attitude-based flying is
+                            // much easier to follow with the ship kept
+                            // in view.
     },
     missions: {
       offeredByBody: {}, // { bodyId: [mission, ...] } — generated lazily

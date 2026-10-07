@@ -64,14 +64,27 @@ const StarMap = (() => {
     const system = getCurrentSystem(state);
     const camera = state.camera;
 
-    // Camera lock-on-ship: re-center every frame BEFORE drawing, rather
-    // than leaving it to input handling, so it stays locked even while
-    // the ship moves under physics alone (no player input needed) and
-    // so a save/load doesn't need special-casing — the camera simply
-    // snaps to wherever the ship is the next time draw() runs.
-    if (camera.followShip) {
+    // Camera lock-on: re-center every frame BEFORE drawing, rather than
+    // leaving it to input handling, so it stays locked even while the
+    // target moves under physics alone (no player input needed) and so
+    // a save/load doesn't need special-casing — the camera simply snaps
+    // to wherever the target is the next time draw() runs. followTarget
+    // is 'ship', a body id (see the FOLLOW menu in index.html, which can
+    // lock onto any body in the system, not just the ship), or null for
+    // a free pan (the same state manually dragging the map switches to).
+    if (camera.followTarget === 'ship') {
       camera.x = state.player.ship.x;
       camera.y = state.player.ship.y;
+    } else if (camera.followTarget) {
+      const followBody = Physics.findBody(system, camera.followTarget);
+      if (followBody) {
+        const pos = Physics.worldPosition(system, followBody);
+        camera.x = pos.x;
+        camera.y = pos.y;
+      }
+      // If the target body doesn't exist (shouldn't normally happen —
+      // every body persists for the life of a system), just leave the
+      // camera wherever it last was rather than erroring.
     }
 
     drawOrbitRings(system, camera);

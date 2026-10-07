@@ -20,7 +20,7 @@ const SaveSystem = (() => {
                                                 // isn't silently lost, not
                                                 // because the old name means
                                                 // anything going forward.
-  const CURRENT_VERSION = 11;
+  const CURRENT_VERSION = 12;
 
   function save(state) {
     state.meta.savedAt = Date.now();
@@ -203,6 +203,20 @@ const SaveSystem = (() => {
         state.missions = { offeredByBody: {}, active: [], nextId: 1 };
       }
       v = 11;
+    }
+
+    if (v < 12) {
+      // Replaced camera.followShip (boolean) with camera.followTarget
+      // ('ship' | a body id | null) — the FOLLOW menu can now lock onto
+      // any body, not just the ship. Old saves have the boolean form:
+      // true -> 'ship' (same effective behavior), false -> null (free
+      // pan, same effective behavior as before).
+      const camera = state.camera;
+      if (camera && typeof camera.followTarget === 'undefined') {
+        camera.followTarget = camera.followShip ? 'ship' : null;
+        delete camera.followShip;
+      }
+      v = 12;
     }
 
     state.meta.version = CURRENT_VERSION;

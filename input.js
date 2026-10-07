@@ -46,11 +46,11 @@ const Input = (() => {
 
     if (pointers.size === 1 && dragStart) {
       // A manual drag means the player wants free camera control, so
-      // disengage follow-ship mode — otherwise the camera would snap
-      // straight back to the ship next frame and dragging would appear
-      // to do nothing, which is a confusing dead control from the
-      // player's point of view.
-      state.camera.followShip = false;
+      // disengage whatever's currently being followed (ship or any
+      // body) — otherwise the camera would snap straight back next
+      // frame and dragging would appear to do nothing, which is a
+      // confusing dead control from the player's point of view.
+      state.camera.followTarget = null;
       const scale = StarMap.BASE_SCALE / state.camera.zoom;
       const dx = (e.clientX - dragStart.x) * scale;
       const dy = (e.clientY - dragStart.y) * scale;
@@ -116,10 +116,13 @@ const Input = (() => {
     onChange();
   }
 
-  function setFollowShip(on) {
-    state.camera.followShip = on;
+  // target: 'ship' | a body id | null (free pan). Generalized from the
+  // original setFollowShip(on) now that the FOLLOW menu in index.html
+  // can lock onto any body in the system, not just the ship.
+  function setFollowTarget(target) {
+    state.camera.followTarget = target;
     onChange();
   }
 
-  return { init, centerOn, setZoom, setFollowShip, MIN_ZOOM, MAX_ZOOM };
+  return { init, centerOn, setZoom, setFollowTarget, MIN_ZOOM, MAX_ZOOM };
 })();

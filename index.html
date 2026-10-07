@@ -185,6 +185,7 @@
   }
   .codex-entry-btn:active { background: rgba(51,255,51,0.12); }
   .codex-entry-btn.moon { padding-left: 22px; color: var(--green-dim); font-size: 12px; }
+  .codex-entry-btn.active-follow { color: var(--green-bright); border-bottom-color: var(--green); }
   .codex-detail h3 { color: var(--green-bright); margin: 0 0 2px; font-size: 16px; letter-spacing: 1px; }
   .codex-detail .codex-type { color: var(--amber); font-size: 11px; letter-spacing: 1px; margin-bottom: 12px; text-transform: uppercase; }
   .codex-field { margin-bottom: 10px; }
@@ -196,39 +197,57 @@
   .codex-personality .name { color: var(--green-bright); }
   .codex-personality .role { color: var(--green-dim); font-size: 11px; }
 
-  /* World-info auto-popup — slides in on the RIGHT when the ship enters
-     orbit around a planet or moon. Deliberately separate from the Codex
-     overlay (not modal, doesn't block the rest of the screen) since it's
-     meant to appear automatically mid-flight without stopping the player
-     from doing anything else. */
+  /* World-info auto-popup — a brief "welcome" card, shown on the RIGHT
+     when the ship enters orbit around a planet or moon. Deliberately
+     separate from the Codex overlay (not modal, doesn't block the rest
+     of the screen) since it's meant to appear automatically mid-flight
+     without stopping the player from doing anything else.
+     Anchored by TOP (not stretched to bottom:0 — a previous version
+     spanned the full screen height and silently covered both the
+     top-right HUD corner and the bottom-right control panel the whole
+     time it was open) with height left to its own short content, and
+     positioned low enough to clear the top-right corner's tallest
+     possible contents (menu button + clock + warp status + build
+     number). At its default content length it also comfortably clears
+     the control panel below, but min() against a generous max-height
+     keeps it that way even if the content ever grows. */
   #world-info-panel {
     position: absolute;
-    top: 0; right: 0; bottom: 0;
-    width: 280px;
-    max-width: 78vw;
+    top: 130px; right: 14px;
+    width: 260px;
+    max-width: 70vw;
+    max-height: min(320px, calc(100% - 220px)); /* stay clear of the control panel even on a short screen */
     background: rgba(0,16,0,0.95);
-    border-left: 1px solid var(--green);
-    box-shadow: -8px 0 24px rgba(0,0,0,0.5);
+    border: 1px solid var(--green);
+    border-radius: 6px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.5);
     z-index: 15;
     display: flex;
     flex-direction: column;
-    transform: translateX(100%);
+    transform: translateX(120%);
     transition: transform 0.25s ease-out;
     pointer-events: none;
   }
   #world-info-panel.visible { transform: translateX(0); pointer-events: auto; }
   #world-info-header {
     display: flex; justify-content: space-between; align-items: center;
-    padding: 14px 14px 10px; border-bottom: 1px solid var(--green-dim);
+    padding: 10px 12px 8px; border-bottom: 1px solid var(--green-dim);
   }
-  #world-info-header h3 { margin: 0; color: var(--green-bright); font-size: 14px; letter-spacing: 1px; }
+  #world-info-header h3 { margin: 0; color: var(--green-bright); font-size: 13px; letter-spacing: 1px; }
   #btn-close-world-info {
     background: none; border: 1px solid var(--green-dim); color: var(--green);
     font-family: inherit; padding: 4px 9px; cursor: pointer; border-radius: 4px;
   }
   #world-info-body {
-    padding: 12px 14px; overflow-y: auto; flex: 1;
-    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    padding: 10px 12px; overflow-y: auto; flex: 1;
+    font-size: 12px; line-height: 1.5;
+  }
+  #world-info-body .codex-type { margin-bottom: 6px; }
+  #btn-world-info-codex {
+    display: block; width: 100%; margin-top: 10px;
+    background: none; border: 1px solid var(--green); color: var(--green-bright);
+    font-family: inherit; padding: 8px; cursor: pointer; border-radius: 4px;
+    font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
   }
 
   #menu-btn {
@@ -304,18 +323,19 @@
       <div class="stat-row"><span class="stat-label">SUPPLY</span><div class="bar"><div class="bar-fill" id="bar-supplies"></div></div><span class="stat-readout" id="readout-supplies">—/—</span></div>
       <button class="btn small" id="btn-engineering" style="margin-top: 6px; width: 100%; pointer-events: auto;">⚙ ENGINEERING</button>
       <div id="hud-credits" style="margin-top: 6px; color: var(--green-bright);">CREDITS: —</div>
+      <div id="hud-mission-status" style="margin-top: 6px; font-size: 10px; color: var(--green-dim); max-width: 180px;">MISSION STATUS: NONE ACTIVE</div>
     </div>
 
     <div class="hud-corner" id="hud-top-right">
       <button class="btn small" id="menu-btn">≡ MENU</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 5</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 6</div>
     </div>
 
     <div id="left-controls">
       <button class="btn small" id="btn-pause">⏸ PAUSE</button>
-      <button class="btn small" id="btn-follow-ship">◎ FOLLOW: ON</button>
+      <button class="btn small" id="btn-follow">◎ FOLLOW: SHIP</button>
       <div id="speed-controls">
         <button class="btn small" data-speed="0.1">0.1x</button>
         <button class="btn small" data-speed="1">1x</button>
@@ -438,6 +458,16 @@
         <h2>ENGINEERING</h2>
         <div id="engineering-body"></div>
         <div class="panel-close"><button class="btn" id="btn-close-engineering">CLOSE</button></div>
+      </div>
+    </div>
+
+    <!-- Follow: lock the camera to the ship or any body in the system.
+         Bodies currently visible on screen are listed first. -->
+    <div class="overlay" id="follow-overlay">
+      <div class="panel codex-panel">
+        <h2>FOLLOW</h2>
+        <div id="follow-body"></div>
+        <div class="panel-close"><button class="btn" id="btn-close-follow">CLOSE</button></div>
       </div>
     </div>
 
@@ -663,12 +693,76 @@ speedButtons.forEach(btn => {
 });
 setSpeedButtonsActive(gameState.time.timeScale);
 
-// ---- Follow-ship camera toggle ----
-const btnFollow = document.getElementById('btn-follow-ship');
+// ---- Follow menu: lock the camera to the ship or any body in the
+// system, rather than the old plain ship-follow toggle. Opens a
+// selection list instead of toggling directly, with bodies CURRENTLY
+// VISIBLE on screen listed first (checked via StarMap.project against
+// the actual canvas size — not just "nearby," since a nearby body can
+// still be off-screen at a tight zoom, and a distant one can be in view
+// at a wide zoom). ----
+const btnFollow = document.getElementById('btn-follow');
+
+function followButtonLabel() {
+  const target = gameState.camera.followTarget;
+  if (!target) return '◎ FOLLOW: FREE';
+  if (target === 'ship') return '◎ FOLLOW: SHIP';
+  const system = getCurrentSystem(gameState);
+  const body = Physics.findBody(system, target);
+  return `◎ FOLLOW: ${body ? body.name.toUpperCase() : 'SHIP'}`;
+}
+function updateFollowButtonLabel() {
+  btnFollow.textContent = followButtonLabel();
+}
+
+function renderFollowMenu() {
+  const canvas = document.getElementById('map');
+  const camera = gameState.camera;
+  const system = getCurrentSystem(gameState);
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+
+  const inView = [];
+  const elsewhere = [];
+  system.bodies.forEach(b => {
+    const pos = Physics.worldPosition(system, b);
+    const screenPos = StarMap.project(camera, pos.x, pos.y);
+    const visible = screenPos.x >= 0 && screenPos.x <= w && screenPos.y >= 0 && screenPos.y <= h;
+    (visible ? inView : elsewhere).push(b);
+  });
+  const byOrbitRadius = (a, b) => (a.orbitRadius || 0) - (b.orbitRadius || 0);
+  inView.sort(byOrbitRadius);
+  elsewhere.sort(byOrbitRadius);
+
+  const currentTarget = camera.followTarget;
+  const entryBtn = (value, label, extraClass) => {
+    const active = currentTarget === value ? ' active-follow' : '';
+    return `<button class="codex-entry-btn${extraClass ? ' ' + extraClass : ''}${active}" data-follow="${value}">${active ? '✓ ' : ''}${label}</button>`;
+  };
+
+  let html = entryBtn('ship', '🚀 SHIP');
+  if (inView.length) {
+    html += '<div class="codex-group-title">IN VIEW</div>';
+    inView.forEach(b => { html += entryBtn(b.id, b.name.toUpperCase(), b.kind === BodyKind.MOON ? 'moon' : ''); });
+  }
+  if (elsewhere.length) {
+    html += '<div class="codex-group-title">ELSEWHERE IN SYSTEM</div>';
+    elsewhere.forEach(b => { html += entryBtn(b.id, b.name.toUpperCase(), b.kind === BodyKind.MOON ? 'moon' : ''); });
+  }
+  document.getElementById('follow-body').innerHTML = html;
+}
+
+document.getElementById('follow-body').addEventListener('click', e => {
+  const btn = e.target.closest('[data-follow]');
+  if (!btn) return;
+  Input.setFollowTarget(btn.dataset.follow);
+  updateFollowButtonLabel();
+  document.getElementById('follow-overlay').classList.remove('visible');
+});
 btnFollow.addEventListener('click', () => {
-  const on = !gameState.camera.followShip;
-  Input.setFollowShip(on);
-  btnFollow.textContent = on ? '◎ FOLLOW: ON' : '◎ FOLLOW: OFF';
+  renderFollowMenu();
+  document.getElementById('follow-overlay').classList.add('visible');
+});
+document.getElementById('btn-close-follow').addEventListener('click', () => {
+  document.getElementById('follow-overlay').classList.remove('visible');
 });
 
 
@@ -767,15 +861,37 @@ document.getElementById('btn-close-codex').addEventListener('click', () => {
 // directly, so this notification concern never gets entangled with that
 // physics-internal bookkeeping.
 const worldInfoPanel = document.getElementById('world-info-panel');
+// A short teaser rather than the field's full text — this popup is
+// meant to be a brief "welcome," with the full Codex entry just a tap
+// away, not a second place to read the whole thing.
+function firstSentence(text) {
+  if (!text) return '';
+  const match = text.match(/^[^.!?]*[.!?]/);
+  return match ? match[0] : text;
+}
+
 function openWorldInfo(bodyId) {
   const system = getCurrentSystem(gameState);
   const body = Physics.findBody(system, bodyId);
   const entry = Codex.getEntry(bodyId);
   if (!body || !entry) return;
-  document.getElementById('world-info-title').textContent = body.name.toUpperCase();
-  document.getElementById('world-info-body').innerHTML = renderCodexEntryHtml(body, entry, { showName: false });
+  document.getElementById('world-info-title').textContent = `WELCOME TO ${body.name.toUpperCase()}`;
+  document.getElementById('world-info-body').innerHTML = `
+    <div class="codex-type">${entry.type}</div>
+    <div>${firstSentence(entry.terrain)}</div>
+    <button id="btn-world-info-codex" data-body-id="${bodyId}">VIEW CODEX ENTRY →</button>
+  `;
   worldInfoPanel.classList.add('visible');
 }
+document.getElementById('world-info-body').addEventListener('click', e => {
+  const btn = e.target.closest('#btn-world-info-codex');
+  if (!btn) return;
+  const targetBodyId = btn.dataset.bodyId;
+  worldInfoPanel.classList.remove('visible');
+  codexView = { mode: 'detail', bodyId: targetBodyId };
+  renderCodexBody();
+  document.getElementById('codex-overlay').classList.add('visible');
+});
 document.getElementById('btn-close-world-info').addEventListener('click', () => {
   worldInfoPanel.classList.remove('visible');
 });
@@ -1073,6 +1189,26 @@ function checkMissionCompletionOnLanding(bodyId) {
   return { completedCount, totalPayment };
 }
 
+// Top-left HUD readout of every active mission's destination — a quick
+// at-a-glance reminder of where you're headed, without needing to land
+// somewhere and open the full Missions board just to check. Comma-
+// separated rather than one per line, to keep this corner from growing
+// tall with several jobs active at once.
+function updateMissionStatusHud() {
+  const el = document.getElementById('hud-mission-status');
+  const active = gameState.missions.active;
+  if (active.length === 0) {
+    el.textContent = 'MISSION STATUS: NONE ACTIVE';
+    return;
+  }
+  const system = getCurrentSystem(gameState);
+  const destinations = active.map(m => {
+    const dest = Physics.findBody(system, m.destinationId);
+    return dest ? dest.name.toUpperCase() : '?';
+  });
+  el.textContent = `MISSION STATUS: ${destinations.join(', ')}`;
+}
+
 // ---- Engineering (five-system condition readout, replacing the old
 // standalone hull bar) ----
 // Order/labels roughly follow the reference diagram's layout (NAV up
@@ -1116,7 +1252,7 @@ document.getElementById('btn-close-engineering').addEventListener('click', () =>
 // that wasn't paused, which would be a confusing, silently-wrong label.
 function syncControlButtonsToState() {
   btnPause.textContent = gameState.time.paused ? '▶ RESUME' : '⏸ PAUSE';
-  btnFollow.textContent = gameState.camera.followShip ? '◎ FOLLOW: ON' : '◎ FOLLOW: OFF';
+  updateFollowButtonLabel();
   btnAlignPro.classList.toggle('active', gameState.player.ship.alignTarget === 'prograde');
   btnAlignRetro.classList.toggle('active', gameState.player.ship.alignTarget === 'retrograde');
   setSpeedButtonsActive(gameState.time.timeScale);
@@ -1251,6 +1387,7 @@ function updateHud() {
   setReadout('readout-supplies', ship.supplies, ship.suppliesMax);
 
   document.getElementById('hud-credits').textContent = `CREDITS: ${formatCredits(gameState.player.credits)}`;
+  updateMissionStatusHud();
 
   // Engineering overlay, if currently open, refreshes live too — wear
   // happens continuously, so a system status open while flying should
