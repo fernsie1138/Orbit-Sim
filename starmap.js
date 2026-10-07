@@ -72,19 +72,33 @@ const StarMap = (() => {
     // is 'ship', a body id (see the FOLLOW menu in index.html, which can
     // lock onto any body in the system, not just the ship), or null for
     // a free pan (the same state manually dragging the map switches to).
-    if (camera.followTarget === 'ship') {
-      camera.x = state.player.ship.x;
-      camera.y = state.player.ship.y;
-    } else if (camera.followTarget) {
-      const followBody = Physics.findBody(system, camera.followTarget);
-      if (followBody) {
-        const pos = Physics.worldPosition(system, followBody);
-        camera.x = pos.x;
-        camera.y = pos.y;
+    //
+    // Wrapped defensively: this whole draw() call runs inside the main
+    // requestAnimationFrame loop with nothing else catching errors above
+    // it — an uncaught throw here wouldn't just skip the camera update,
+    // it would abort this entire frame AND stop the next one from ever
+    // being scheduled, silently freezing the whole game (not just the
+    // camera) from that point on. That would be a much bigger, easy-to-
+    // miss failure mode than it sounds — falling back to leaving the
+    // camera wherever it already was is a far safer failure than
+    // silently halting everything.
+    try {
+      if (camera.followTarget === 'ship') {
+        camera.x = state.player.ship.x;
+        camera.y = state.player.ship.y;
+      } else if (camera.followTarget) {
+        const followBody = Physics.findBody(system, camera.followTarget);
+        if (followBody) {
+          const pos = Physics.worldPosition(system, followBody);
+          camera.x = pos.x;
+          camera.y = pos.y;
+        }
+        // If the target body doesn't exist (shouldn't normally happen —
+        // every body persists for the life of a system), just leave the
+        // camera wherever it last was rather than erroring.
       }
-      // If the target body doesn't exist (shouldn't normally happen —
-      // every body persists for the life of a system), just leave the
-      // camera wherever it last was rather than erroring.
+    } catch (err) {
+      console.error('Camera follow failed:', err);
     }
 
     drawOrbitRings(system, camera);

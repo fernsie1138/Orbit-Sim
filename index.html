@@ -330,7 +330,7 @@
       <button class="btn small" id="menu-btn">≡ MENU</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 6</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 7</div>
     </div>
 
     <div id="left-controls">
@@ -748,15 +748,30 @@ function renderFollowMenu() {
     elsewhere.forEach(b => { html += entryBtn(b.id, b.name.toUpperCase(), b.kind === BodyKind.MOON ? 'moon' : ''); });
   }
   document.getElementById('follow-body').innerHTML = html;
+
+  // Bind each rendered button DIRECTLY (not via a single delegated
+  // listener up on #follow-body with e.target.closest()) — functionally
+  // equivalent when everything's working, but this removes any
+  // dependency on event bubbling/closest() for this specific feature,
+  // in case that was ever part of the problem. Wrapped in a try/catch
+  // that shows the actual error as an on-screen toast: this app has no
+  // visible console on an iPad used on its own, so a silent thrown
+  // error here would look exactly like "nothing happens" with no way
+  // to see why — this makes any real failure visible without needing
+  // devtools at all.
+  document.querySelectorAll('#follow-body [data-follow]').forEach(btn => {
+    btn.onclick = () => {
+      try {
+        Input.setFollowTarget(btn.dataset.follow);
+        updateFollowButtonLabel();
+        document.getElementById('follow-overlay').classList.remove('visible');
+      } catch (err) {
+        showToast('FOLLOW ERROR: ' + err.message);
+      }
+    };
+  });
 }
 
-document.getElementById('follow-body').addEventListener('click', e => {
-  const btn = e.target.closest('[data-follow]');
-  if (!btn) return;
-  Input.setFollowTarget(btn.dataset.follow);
-  updateFollowButtonLabel();
-  document.getElementById('follow-overlay').classList.remove('visible');
-});
 btnFollow.addEventListener('click', () => {
   renderFollowMenu();
   document.getElementById('follow-overlay').classList.add('visible');
