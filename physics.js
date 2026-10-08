@@ -456,7 +456,13 @@ const Physics = (() => {
   // temporary, fully repairable, exactly as before.
   const ENGINEERING_PERMANENT_DAMAGE_CHANCE = 0.075;
 
+  const ENGINEERING_CAUTION_COST_MIN = 10, ENGINEERING_CAUTION_COST_MAX = 20; // supply cost to clear a caution via emergency repair
+
+  // Returns true if this call caused at least one system to newly enter
+  // MASTER CAUTION (used by step() to react immediately — see there for
+  // what that triggers: time-warp reset, flight lockout).
   function applyEngineeringWear(ship, dt) {
+    let causedNewCaution = false;
     const expectedEvents = ENGINEERING_WEAR_EVENT_RATE * dt;
     let events = Math.floor(expectedEvents);
     const remainder = expectedEvents - events;
@@ -478,8 +484,25 @@ const Physics = (() => {
         // was already sitting at (or close to) the OLD ceiling when
         // this event drops the ceiling below it.
         ship[system] = Math.min(ship[system], ship[maxKey]);
+
+        // Flag MASTER CAUTION for this system. If it's already flagged
+        // (an earlier, still-unrepaired incident on the same system),
+        // leave its rolled cost alone rather than re-rolling — the
+        // player shouldn't see the price change out from under them for
+        // a fault they haven't addressed yet.
+        const cautionKey = system + 'Caution';
+        if (!ship[cautionKey]) {
+          ship[cautionKey] = true;
+          ship[system + 'CautionCost'] = ENGINEERING_CAUTION_COST_MIN + Math.random() * (ENGINEERING_CAUTION_COST_MAX - ENGINEERING_CAUTION_COST_MIN);
+          causedNewCaution = true;
+        }
       }
     }
+    return causedNewCaution;
+  }
+
+  function hasAnyCaution(ship) {
+    return ENGINEERING_SYSTEMS.some(key => ship[key + 'Caution']);
   }
 
   // Ambient NPC ship traffic — purely cosmetic background flavor, not a
@@ -723,6 +746,15 @@ const Physics = (() => {
     const system = getCurrentSystem(state);
     const ship = state.player.ship;
 
+    // MASTER CAUTION lockout: while ANY system has taken permanent
+    // damage and hasn't been repaired yet, the ship cannot maneuver or
+    // burn at all — enforced HERE, at the physics level, not just by
+    // disabling the on-screen buttons, so a stuck control or stale UI
+    // state can never sneak a burn through. The ship still coasts under
+    // gravity (stepShip still runs below) — this blocks ACTIVE flying,
+    // not existing motion.
+    const lockedOut = hasAnyCaution(ship);
+
     if (state.player.location === 'landed') {
       // Bodies still advance (the exact closed-form angle update in
       // stepBodies is not an approximation, so one big dt step here is
@@ -733,7 +765,7 @@ const Physics = (() => {
       stepBodies(system, dt);
       updateLandedShipPosition(state);
     } else {
-      if (controls) {
+      if (controls && !lockedOut) {
         stepAttitude(system, ship, dt, controls.rotate || 0);
         if (controls.thrust) thrustForward(ship, dt);
       }
@@ -744,11 +776,17 @@ const Physics = (() => {
                                        // flight state — life support doesn't
                                        // pause just because you're landed.
     if (state.player.location !== 'landed') {
-      applyEngineeringWear(ship, dt); // engine/reactor/hull/nav/cooler wear
-                                       // randomly — FLYING ONLY (see that
+      const causedNewCaution = applyEngineeringWear(ship, dt); // engine/reactor/hull/nav/cooler
+                                       // wear randomly — FLYING ONLY (see that
                                        // function's comment for why): a
                                        // landed, parked ship isn't being
                                        // stressed the way active flight does.
+      if (causedNewCaution) {
+        // "The simulation returns to 1x speed immediately" — set directly
+        // here, the instant the triggering event happens, rather than
+        // leaving it for the UI to notice on some later frame.
+        state.time.timeScale = 1;
+      }
     }
     updateNpcShips(state, dt); // ambient background traffic — keeps
                                  // coming and going regardless of the
@@ -1061,7 +1099,7 @@ const Physics = (() => {
     nearestBody, predictTrajectory, orbitalElements, THRUST_ACCEL, bodyWorldVelocityAt,
     applySoftCapture, CAPTURE_SPEED_FRACTION,
     landingRangeFor, findLandableBody, land, launch,
-    ENGINEERING_SYSTEMS, applyEngineeringWear,
+    ENGINEERING_SYSTEMS, applyEngineeringWear, hasAnyCaution,
     updateNpcShips,
   };
 })();

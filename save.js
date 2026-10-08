@@ -20,7 +20,7 @@ const SaveSystem = (() => {
                                                 // isn't silently lost, not
                                                 // because the old name means
                                                 // anything going forward.
-  const CURRENT_VERSION = 14;
+  const CURRENT_VERSION = 15;
 
   function save(state) {
     state.meta.savedAt = Date.now();
@@ -242,6 +242,24 @@ const SaveSystem = (() => {
         });
       }
       v = 14;
+    }
+
+    if (v < 15) {
+      // Added MASTER CAUTION tracking per system (<key>Caution,
+      // <key>CautionCost — see state.js). Old saves have neither —
+      // default every system to "not in caution," which is always safe
+      // regardless of where an existing save left off (worst case, a
+      // permanently-damaged-but-uncautioned system just needed its next
+      // wear event to re-trigger the flag, rather than carrying over a
+      // flag from before this feature existed).
+      const ship = state.player && state.player.ship;
+      if (ship && typeof ship.hullCaution === 'undefined') {
+        ['hull', 'engine', 'reactor', 'nav', 'cooler'].forEach(key => {
+          ship[key + 'Caution'] = false;
+          ship[key + 'CautionCost'] = 0;
+        });
+      }
+      v = 15;
     }
 
     state.meta.version = CURRENT_VERSION;

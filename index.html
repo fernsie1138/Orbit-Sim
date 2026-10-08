@@ -283,6 +283,30 @@
     94% { opacity: 1; }
   }
 
+  #master-caution {
+    position: absolute;
+    top: 10px; left: 50%;
+    transform: translateX(-50%);
+    padding: 7px 18px;
+    background: #cc0000;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    border: 1px solid #ff4444;
+    border-radius: 4px;
+    text-shadow: 0 0 6px rgba(0,0,0,0.6);
+    box-shadow: 0 0 16px rgba(255,0,0,0.6);
+    z-index: 25; /* above everything but still beneath nothing needs to sit on top of it */
+    display: none;
+    animation: master-caution-flash 1s steps(1) infinite;
+  }
+  #master-caution.active { display: block; }
+  @keyframes master-caution-flash {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0.25; }
+  }
+
   #toast {
     position: absolute;
     /* Clear of BOTH top corners' HUD text, not just a guess at the
@@ -313,6 +337,12 @@
   <div id="screen">
     <canvas id="map"></canvas>
 
+    <!-- MASTER CAUTION: lit whenever any Engineering system has taken
+         permanent damage and hasn't been repaired yet (see Physics.
+         hasAnyCaution). Flight controls are disabled for the same
+         duration — see setFlightControlsEnabled's caution check. -->
+    <div id="master-caution">⚠ MASTER CAUTION ⚠</div>
+
     <div class="hud-corner" id="hud-top-left">
       <div id="hud-location">SYSTEM: —</div>
       <div id="hud-refbody">TRACKING: —</div>
@@ -330,7 +360,7 @@
       <button class="btn small" id="menu-btn">≡ MENU</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 9</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 10</div>
     </div>
 
     <div id="left-controls">
@@ -616,6 +646,21 @@ function setFlightControlsEnabled(enabled) {
     btnRotateRight.classList.remove('active');
     btnBurn.classList.remove('active');
   }
+}
+
+// MASTER CAUTION: lights the on-screen warning and keeps flight controls
+// disabled for as long as ANY Engineering system has taken permanent
+// damage and hasn't been repaired — recomputed every frame (see the
+// main loop) rather than only on specific events, so it can never drift
+// out of sync with the actual game state regardless of what changed it
+// (a caution newly triggering mid-flight, a repair clearing the last
+// one, a save load, etc.). The physics layer enforces the actual flight
+// lockout independently of this (see Physics.step) — this is what makes
+// that lockout VISIBLE and keeps the buttons from looking pressable.
+function updateMasterCautionUI() {
+  const caution = Physics.hasAnyCaution(gameState.player.ship);
+  document.getElementById('master-caution').classList.toggle('active', caution);
+  setFlightControlsEnabled(gameState.player.location !== 'landed' && !caution);
 }
 
 function updateLandLaunchControl() {
@@ -1084,13 +1129,25 @@ function repairSystem(key) {
   const price = Economy.repairPriceAt(bodyId);
   if (!price || price <= 0) return;
   const needed = ship[key + 'Max'] - ship[key];
-  if (needed <= 0) return;
-  const affordablePoints = gameState.player.credits / price;
-  const pointsToRepair = Math.min(needed, affordablePoints);
-  if (pointsToRepair <= 0) return;
-  const cost = pointsToRepair * price;
-  ship[key] = Math.min(ship[key + 'Max'], ship[key] + pointsToRepair);
-  gameState.player.credits = Math.max(0, gameState.player.credits - cost);
+  if (needed > 0) {
+    const affordablePoints = gameState.player.credits / price;
+    const pointsToRepair = Math.min(needed, affordablePoints);
+    if (pointsToRepair > 0) {
+      const cost = pointsToRepair * price;
+      ship[key] = Math.min(ship[key + 'Max'], ship[key] + pointsToRepair);
+      gameState.player.credits = Math.max(0, gameState.player.credits - cost);
+    }
+  }
+  // Actually repairing a system — via EITHER this credits-based path or
+  // the supplies-based emergency repair on the ENGINEERING screen —
+  // clears any MASTER CAUTION fault on it, since the fault is the
+  // system being damaged, not which currency paid to fix it. Only once
+  // it's genuinely back AT its (possibly reduced) ceiling, not on a
+  // partial afford-what-you-can repair that still leaves it short.
+  if (ship[key] >= ship[key + 'Max']) {
+    ship[key + 'Caution'] = false;
+    ship[key + 'CautionCost'] = 0;
+  }
   renderRepair();
   updateHud();
 }
@@ -1256,14 +1313,47 @@ function renderEngineering() {
     // when undamaged (reads as "100/100/100" until permanent damage
     // ever knocks the middle number down).
     const readout = `${Math.round(current)}/${Math.round(max)}/${Math.round(base)}`;
-    html += `<div class="stat-row" style="margin-bottom: 10px;">
+    const inCaution = ship[key + 'Caution'];
+    html += `<div class="stat-row" style="margin-bottom: ${inCaution ? 4 : 10}px;">
       <span class="stat-label" style="width: 80px;">${ENGINEERING_LABELS[key]}</span>
       <div class="bar"><div class="bar-fill ${barClass}" style="width: ${pct}%;"></div></div>
       <span class="stat-readout">${readout}</span>
     </div>`;
+    // Emergency repair — only shown for a system actually in MASTER
+    // CAUTION (permanent damage not yet addressed). Paid in supplies,
+    // available anywhere (not landed-only, unlike the credits-based
+    // Repair screen under Landing Services) since the whole point is
+    // resolving a flight lockout that could strike mid-journey.
+    if (inCaution) {
+      const cost = ship[key + 'CautionCost'];
+      const canAfford = ship.supplies >= cost;
+      html += `<div class="codex-field" style="margin: 0 0 10px 0; border: 1px solid #cc0000; border-radius: 4px; padding: 6px 8px;">
+        <div style="color:#ff6666; font-size:11px; margin-bottom:4px; letter-spacing:0.5px;">⚠ PERMANENT DAMAGE — EMERGENCY REPAIR REQUIRED</div>
+        <button class="btn small" data-emergency-repair="${key}" ${canAfford ? '' : 'disabled'}>
+          ${canAfford ? `REPAIR (${cost.toFixed(0)} SUPPLY)` : 'REPAIR (INSUFFICIENT SUPPLY)'}
+        </button>
+      </div>`;
+    }
   });
   document.getElementById('engineering-body').innerHTML = html;
 }
+
+function repairEmergency(key) {
+  const ship = gameState.player.ship;
+  const cost = ship[key + 'CautionCost'];
+  if (ship.supplies < cost) return; // button should already be disabled in this case
+  ship.supplies -= cost;
+  ship[key] = ship[key + 'Max']; // full repair to the current ceiling (not the original base)
+  ship[key + 'Caution'] = false;
+  ship[key + 'CautionCost'] = 0;
+  showToast(`${ENGINEERING_LABELS[key].toUpperCase()} REPAIRED — -${cost.toFixed(0)} SUPPLY`);
+  renderEngineering();
+  updateHud();
+}
+document.getElementById('engineering-body').addEventListener('click', e => {
+  const btn = e.target.closest('[data-emergency-repair]');
+  if (btn) repairEmergency(btn.dataset.emergencyRepair);
+});
 
 document.getElementById('btn-engineering').addEventListener('click', () => {
   renderEngineering();
@@ -1288,7 +1378,7 @@ function syncControlButtonsToState() {
   btnRotateLeft.classList.remove('active');
   btnRotateRight.classList.remove('active');
   btnBurn.classList.remove('active');
-  setFlightControlsEnabled(gameState.player.location !== 'landed');
+  updateMasterCautionUI(); // also sets flight-controls-enabled correctly, factoring in both location and any loaded-in caution state
   updateLandLaunchControl();
   // Re-sync to wherever the (newly loaded/reset) ship actually is, so a
   // load/new-game/reset never spuriously re-shows the arrival popup for
@@ -1438,6 +1528,7 @@ function loop(now) {
   StarMap.draw(gameState);
   updateHud();
   updateLandLaunchControl();
+  updateMasterCautionUI();
   checkWorldArrival();
 
   requestAnimationFrame(loop);

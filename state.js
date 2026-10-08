@@ -399,6 +399,25 @@ function createNewGameState() {
         reactor: 100, reactorMax: 100, reactorBase: 100,
         nav: 100, navMax: 100, navBase: 100,
         cooler: 100, coolerMax: 100, coolerBase: 100,
+        // <key>Caution: true the moment a system takes PERMANENT damage,
+        // until the player repairs it away (see Physics.step, which —
+        // while ANY system is in caution — immediately drops time-warp
+        // to 1x, refuses all attitude/thrust input regardless of what
+        // controls say, and index.html's MASTER CAUTION light stays lit
+        // and flight buttons stay disabled). Cleared by either the
+        // emergency in-flight repair (ENGINEERING screen, costs
+        // supplies — see repairEmergency in index.html) or the ordinary
+        // credits-based repair while landed (LANDING SERVICES, since
+        // actually repairing the system should clear its fault
+        // regardless of which path paid for it).
+        // <key>CautionCost: the supply cost (10-20, rolled once per
+        // incident so the displayed price doesn't jump around) of
+        // clearing THIS specific caution via the emergency repair.
+        hullCaution: false, hullCautionCost: 0,
+        engineCaution: false, engineCautionCost: 0,
+        reactorCaution: false, reactorCautionCost: 0,
+        navCaution: false, navCautionCost: 0,
+        coolerCaution: false, coolerCautionCost: 0,
         name: 'Wanderer',
       },
     },
