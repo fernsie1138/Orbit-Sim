@@ -367,7 +367,7 @@
       <div class="stat-row"><span class="stat-label">SUPPLY</span><div class="bar"><div class="bar-fill" id="bar-supplies"></div></div><span class="stat-readout" id="readout-supplies">—/—</span></div>
       <button class="btn small" id="btn-engineering" style="margin-top: 6px; width: 100%; pointer-events: auto;">⚙ ENGINEERING</button>
       <div id="hud-credits" style="margin-top: 6px; color: var(--green-bright);">CREDITS: —</div>
-      <div id="hud-mission-status" style="margin-top: 6px; font-size: 10px; color: var(--green-dim); max-width: 180px;">MISSION STATUS: NONE ACTIVE</div>
+      <div id="hud-mission-status" style="margin-top: 6px; font-size: 10px; color: var(--green-dim); max-width: 180px;">JOB STATUS: NONE ACTIVE</div>
     </div>
 
     <div class="hud-corner" id="hud-top-right">
@@ -375,7 +375,7 @@
       <button class="btn small" id="test-btn">🧪 TEST</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 12</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 13</div>
     </div>
 
     <div id="left-controls">
@@ -477,7 +477,7 @@
         <h2 id="landing-services-title">LANDING SERVICES</h2>
         <div class="row">
           <button class="btn" id="btn-open-ship-services">⛽ SHIP SERVICES</button>
-          <button class="btn" id="btn-open-missions">📋 MISSIONS</button>
+          <button class="btn" id="btn-open-missions">📋 JOB BOARD</button>
           <button class="btn" id="btn-open-repair">🔧 REPAIR</button>
         </div>
         <div class="panel-close"><button class="btn" id="btn-close-landing-services">CLOSE</button></div>
@@ -504,7 +504,7 @@
 
     <div class="overlay" id="missions-overlay">
       <div class="panel codex-panel">
-        <h2>MISSIONS</h2>
+        <h2>JOB BOARD</h2>
         <div id="missions-body"></div>
         <div class="panel-close"><button class="btn" id="btn-back-missions">← LANDING SERVICES</button></div>
       </div>
@@ -736,7 +736,7 @@ btnLandLaunch.addEventListener('click', () => {
     const missionResult = checkMissionCompletionOnLanding(body.id);
     if (missionResult.completedCount > 0) {
       const plural = missionResult.completedCount > 1 ? 'S' : '';
-      showToast(`LANDED AT ${body.name.toUpperCase()} — ${missionResult.completedCount} MISSION${plural} COMPLETE (+${formatCredits(missionResult.totalPayment)} CR)`);
+      showToast(`LANDED AT ${body.name.toUpperCase()} — ${missionResult.completedCount} JOB${plural} COMPLETE (+${formatCredits(missionResult.totalPayment)} CR)`);
     } else {
       showToast(`LANDED AT ${body.name.toUpperCase()}`);
     }
@@ -1221,32 +1221,66 @@ function ensureMissionsGeneratedFor(bodyId) {
   gameState.missions.nextId = result.nextId;
 }
 
+// Whether the ship's CURRENT state (hold space, accommodation class,
+// free berths) can actually take a given job — generation (missions.js)
+// deliberately has no idea what ship is reading the board, so jobs can
+// and will show up the player's ship simply can't do yet (oversized
+// freight, too plush a cabin class, too many passengers at once). That's
+// expected, not a bug — "no jobs suitable here" is a real, intended
+// outcome the player may have to travel to resolve. Data jobs have no
+// capacity requirement at all (a weightless package).
+function getMissionAcceptability(mission) {
+  const ship = gameState.player.ship;
+  if (mission.type === 'cargo') {
+    const freeCargo = ship.cargoCapacity - ship.cargoUsed;
+    if (mission.cargoUnits > freeCargo) {
+      return { acceptable: false, reason: `NEEDS ${mission.cargoUnits} CARGO UNITS — ${freeCargo} FREE` };
+    }
+  } else if (mission.type === 'passenger') {
+    if (mission.accommodationClass > ship.accommodationClass) {
+      return { acceptable: false, reason: `NEEDS ACCOMMODATION CLASS ${mission.accommodationClass} — SHIP IS CLASS ${ship.accommodationClass}` };
+    }
+    const freeBerths = ship.passengerCapacity - ship.passengersCarried;
+    if (mission.passengerCount > freeBerths) {
+      return { acceptable: false, reason: `NEEDS ${mission.passengerCount} BERTHS — ${freeBerths} FREE` };
+    }
+  }
+  return { acceptable: true, reason: null };
+}
+
 function renderMissions() {
   const landed = gameState.player.location === 'landed';
   const bodyId = gameState.player.landedBodyId;
+  const ship = gameState.player.ship;
   let html = '';
+
+  html += `<div class="codex-field-body" style="margin-bottom: 10px; font-size: 11px; color: var(--green-dim);">
+    CARGO HOLD: ${ship.cargoUsed}/${ship.cargoCapacity} UNITS &nbsp;|&nbsp; QUARTERS: ${ship.passengersCarried}/${ship.passengerCapacity} (CLASS ${ship.accommodationClass})
+  </div>`;
 
   if (landed) {
     ensureMissionsGeneratedFor(bodyId);
     const offered = gameState.missions.offeredByBody[bodyId] || [];
     html += '<div class="codex-group-title">AVAILABLE HERE</div>';
     if (offered.length === 0) {
-      html += '<div class="codex-field-body"><em>No jobs currently posted at this location.</em></div>';
+      html += '<div class="codex-field-body"><em>No jobs currently posted at this location. Try elsewhere.</em></div>';
     } else {
       offered.forEach(m => {
+        const { acceptable, reason } = getMissionAcceptability(m);
         html += `<div class="codex-field">
           <div class="codex-field-label">${m.type.toUpperCase()} — ${formatCredits(m.payment)} CR</div>
           <div class="codex-field-body">${m.description}
-            <br><button class="btn small" data-accept="${m.id}" style="margin-top:6px;">ACCEPT</button>
+            ${!acceptable ? `<br><span style="color:#ff6666; font-size:10px;">⚠ ${reason}</span>` : ''}
+            <br><button class="btn small" data-accept="${m.id}" style="margin-top:6px;" ${acceptable ? '' : 'disabled'}>${acceptable ? 'ACCEPT' : 'CANNOT ACCEPT'}</button>
           </div>
         </div>`;
       });
     }
   }
 
-  html += '<div class="codex-group-title" style="margin-top:14px;">ACTIVE MISSIONS</div>';
+  html += '<div class="codex-group-title" style="margin-top:14px;">ACTIVE JOBS</div>';
   if (gameState.missions.active.length === 0) {
-    html += '<div class="codex-field-body"><em>No missions currently in progress.</em></div>';
+    html += '<div class="codex-field-body"><em>No jobs currently in progress.</em></div>';
   } else {
     const system = getCurrentSystem(gameState);
     gameState.missions.active.forEach(m => {
@@ -1267,9 +1301,22 @@ function acceptMission(missionId) {
   if (!offered) return;
   const idx = offered.findIndex(m => m.id === missionId);
   if (idx === -1) return;
-  const mission = offered.splice(idx, 1)[0];
+  const mission = offered[idx];
+  // Re-check here too (not just trust the UI's disabled state) — same
+  // defense-in-depth reasoning used elsewhere in this game: a stale
+  // render or a fast double-tap should never let the ship take on more
+  // than it can actually hold.
+  const { acceptable, reason } = getMissionAcceptability(mission);
+  if (!acceptable) {
+    showToast(`CANNOT ACCEPT — ${reason}`);
+    return;
+  }
+  offered.splice(idx, 1);
   gameState.missions.active.push(mission);
-  showToast(`MISSION ACCEPTED: +${formatCredits(mission.payment)} CR ON DELIVERY`);
+  const ship = gameState.player.ship;
+  if (mission.type === 'cargo') ship.cargoUsed += mission.cargoUnits;
+  else if (mission.type === 'passenger') ship.passengersCarried += mission.passengerCount;
+  showToast(`JOB ACCEPTED: +${formatCredits(mission.payment)} CR ON DELIVERY`);
   renderMissions();
 }
 document.getElementById('missions-body').addEventListener('click', e => {
@@ -1296,11 +1343,16 @@ document.getElementById('btn-back-missions').addEventListener('click', () => {
 // silently drop whichever one fired first; the caller combines both
 // into a single toast instead.
 function checkMissionCompletionOnLanding(bodyId) {
+  const ship = gameState.player.ship;
   const stillActive = [];
   let completedCount = 0, totalPayment = 0;
   gameState.missions.active.forEach(m => {
     if (m.destinationId === bodyId) {
       gameState.player.credits += m.payment;
+      // Free up whatever hold space/berths this job was occupying — the
+      // cargo's been handed off, the passengers have disembarked.
+      if (m.type === 'cargo') ship.cargoUsed = Math.max(0, ship.cargoUsed - (m.cargoUnits || 0));
+      else if (m.type === 'passenger') ship.passengersCarried = Math.max(0, ship.passengersCarried - (m.passengerCount || 0));
       completedCount++;
       totalPayment += m.payment;
     } else {
@@ -1320,7 +1372,7 @@ function updateMissionStatusHud() {
   const el = document.getElementById('hud-mission-status');
   const active = gameState.missions.active;
   if (active.length === 0) {
-    el.textContent = 'MISSION STATUS: NONE ACTIVE';
+    el.textContent = 'JOB STATUS: NONE ACTIVE';
     return;
   }
   const system = getCurrentSystem(gameState);
@@ -1328,7 +1380,7 @@ function updateMissionStatusHud() {
     const dest = Physics.findBody(system, m.destinationId);
     return dest ? dest.name.toUpperCase() : '?';
   });
-  el.textContent = `MISSION STATUS: ${destinations.join(', ')}`;
+  el.textContent = `JOB STATUS: ${destinations.join(', ')}`;
 }
 
 // ---- Engineering (five-system condition readout, replacing the old

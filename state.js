@@ -419,6 +419,20 @@ function createNewGameState() {
         navCaution: false, navCautionCost: 0,
         coolerCaution: false, coolerCautionCost: 0,
         name: 'Wanderer',
+        // Job Board capacity — gates which cargo/passenger jobs this
+        // ship can actually ACCEPT (see acceptMission in index.html).
+        // cargoUsed/passengersCarried track what's currently committed
+        // across all ACTIVE jobs (freed up again on delivery), not a
+        // single job's own size — accepting several small cargo jobs
+        // can fill the hold the same as one big one. All five numbers
+        // are meant to grow in future updates (a bigger hold, more
+        // bunks, nicer quarters) — nothing elsewhere assumes these stay
+        // at their starting values.
+        cargoCapacity: 10,
+        cargoUsed: 0,
+        accommodationClass: 1, // 1 (rudimentary) to 5 (luxury) — the highest class of passenger job this ship can host
+        passengerCapacity: 3,
+        passengersCarried: 0,
       },
     },
     camera: {

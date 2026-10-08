@@ -20,7 +20,7 @@ const SaveSystem = (() => {
                                                 // isn't silently lost, not
                                                 // because the old name means
                                                 // anything going forward.
-  const CURRENT_VERSION = 15;
+  const CURRENT_VERSION = 16;
 
   function save(state) {
     state.meta.savedAt = Date.now();
@@ -260,6 +260,30 @@ const SaveSystem = (() => {
         });
       }
       v = 15;
+    }
+
+    if (v < 16) {
+      // Added Job Board capacity (cargoCapacity/cargoUsed,
+      // accommodationClass, passengerCapacity/passengersCarried — see
+      // state.js). Old saves have none of these — default to a stock
+      // ship's starting values. Note: if this save already has active
+      // cargo/passenger jobs from before this update, they predate
+      // cargoUnits/passengerCount being stored on the mission itself, so
+      // there's no way to retroactively know how much capacity they
+      // should have reserved — cargoUsed/passengersCarried start at 0
+      // regardless, meaning an old in-progress job won't count against
+      // the new capacity limits until it's delivered. A minor, temporary
+      // inconsistency for existing saves only; every job accepted from
+      // here on reserves capacity correctly.
+      const ship = state.player && state.player.ship;
+      if (ship && typeof ship.cargoCapacity === 'undefined') {
+        ship.cargoCapacity = 10;
+        ship.cargoUsed = 0;
+        ship.accommodationClass = 1;
+        ship.passengerCapacity = 3;
+        ship.passengersCarried = 0;
+      }
+      v = 16;
     }
 
     state.meta.version = CURRENT_VERSION;
