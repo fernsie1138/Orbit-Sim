@@ -375,7 +375,7 @@
       <button class="btn small" id="test-btn">🧪 TEST</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 11</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 12</div>
     </div>
 
     <div id="left-controls">
@@ -1341,69 +1341,139 @@ function updateMissionStatusHud() {
 const ENGINEERING_LABELS = { nav: 'NAV', reactor: 'REACTOR', hull: 'HULL', engine: 'ENGINE', cooler: 'COOLER' };
 const ENGINEERING_ORDER = ['nav', 'reactor', 'hull', 'engine', 'cooler'];
 
+// renderEngineering() used to unconditionally replace #engineering-body's
+// entire innerHTML every time it ran — including every single animation
+// frame while the overlay was open (see updateHud below), since this was
+// meant to keep the bars ticking live. That meant the REPAIR button (and
+// everything else in there) was being destroyed and recreated up to 60
+// times a second. On a touchscreen a tap isn't instantaneous — there's a
+// real gap between touchstart and touchend — so if the element you're
+// touching gets replaced mid-tap, the browser can fail to ever fire the
+// click at all. That's almost certainly what made the repair button (and
+// reportedly even the CLOSE button, likely via the same rapid-reflow
+// churn) feel unresponsive right when it mattered most.
+//
+// Fixed by rebuilding the actual DOM structure (innerHTML) ONLY when it
+// genuinely needs to change — i.e. when some system's caution state
+// flips (its repair block appears or disappears) — tracked via
+// engineeringLastCautionSignature below. On every other call (the
+// common case, called every frame so the bars/numbers stay live) this
+// just updates each row's existing bar width and readout text directly
+// by id, touching nothing else — the button, if present, is never
+// touched, so it can never be mid-tap-destroyed by an ordinary numeric
+// tick.
+let engineeringLastCautionSignature = null;
+
+function renderEngineeringRow(key) {
+  const ship = gameState.player.ship;
+  const current = ship[key];
+  const max = ship[key + 'Max'];
+  const base = ship[key + 'Base'];
+  const pct = Math.max(0, Math.min(100, (current / max) * 100));
+  let barClass = '';
+  if (pct < 15) barClass = 'crit';
+  else if (pct < 40) barClass = 'warn';
+  const inCaution = ship[key + 'Caution'];
+  let html = `<div class="stat-row" style="margin-bottom: ${inCaution ? 4 : 10}px;">
+    <span class="stat-label" style="width: 80px;">${ENGINEERING_LABELS[key]}</span>
+    <div class="bar"><div class="bar-fill ${barClass}" id="eng-bar-${key}" style="width: ${pct}%;"></div></div>
+    <span class="stat-readout" id="eng-readout-${key}">${Math.round(current)}/${Math.round(max)}/${Math.round(base)}</span>
+  </div>`;
+  if (inCaution) {
+    const cost = ship[key + 'CautionCost'];
+    const canAfford = ship.supplies >= cost;
+    html += `<div class="codex-field" style="margin: 0 0 10px 0; border: 1px solid #cc0000; border-radius: 4px; padding: 6px 8px;">
+      <div style="color:#ff6666; font-size:11px; margin-bottom:4px; letter-spacing:0.5px;">⚠ PERMANENT DAMAGE — EMERGENCY REPAIR REQUIRED</div>
+      <button class="btn small" id="eng-repair-btn-${key}" ${canAfford ? '' : 'disabled'}>
+        ${canAfford ? `REPAIR (${cost.toFixed(0)} SUPPLY)` : 'REPAIR (INSUFFICIENT SUPPLY)'}
+      </button>
+    </div>`;
+  }
+  return html;
+}
+
+function bindEngineeringRepairButtons() {
+  // Direct per-button binding (not event delegation) for the same
+  // reason the FOLLOW menu moved to it: one less layer between a tap
+  // and the handler actually running. Safe to call every time a
+  // structural rebuild happens, since these buttons only exist for
+  // systems currently in caution, which is exactly when a rebuild
+  // fires anyway.
+  ENGINEERING_ORDER.forEach(key => {
+    const btn = document.getElementById(`eng-repair-btn-${key}`);
+    if (btn) btn.onclick = () => repairEmergency(key);
+  });
+}
+
 function renderEngineering() {
   const ship = gameState.player.ship;
-  let html = '';
+  // Signature includes affordability per caution, not just which
+  // systems are flagged — otherwise, if supplies change (spent or
+  // gained elsewhere) while a caution is already active and this screen
+  // happens to be open, the button's enabled/disabled state and label
+  // would silently go stale until something else forced a rebuild.
+  // Still a rare-event check overall (crossing the specific threshold),
+  // not a per-frame one.
+  const signature = ENGINEERING_ORDER
+    .filter(k => ship[k + 'Caution'])
+    .map(k => k + ':' + (ship.supplies >= ship[k + 'CautionCost'] ? '1' : '0'))
+    .join(',');
+  const needsRebuild = signature !== engineeringLastCautionSignature;
+
+  if (needsRebuild) {
+    document.getElementById('engineering-body').innerHTML = ENGINEERING_ORDER.map(renderEngineeringRow).join('');
+    bindEngineeringRepairButtons();
+    engineeringLastCautionSignature = signature;
+    return;
+  }
+
+  // No structural change — just refresh the numbers in place.
   ENGINEERING_ORDER.forEach(key => {
     const current = ship[key];
-    const max = ship[key + 'Max']; // current repair ceiling
-    const base = ship[key + 'Base']; // original/design rating
+    const max = ship[key + 'Max'];
+    const base = ship[key + 'Base'];
     const pct = Math.max(0, Math.min(100, (current / max) * 100));
-    let barClass = '';
-    if (pct < 15) barClass = 'crit';
-    else if (pct < 40) barClass = 'warn';
-    // Always three numbers — current/ceiling/original — per spec, even
-    // when undamaged (reads as "100/100/100" until permanent damage
-    // ever knocks the middle number down).
-    const readout = `${Math.round(current)}/${Math.round(max)}/${Math.round(base)}`;
-    const inCaution = ship[key + 'Caution'];
-    html += `<div class="stat-row" style="margin-bottom: ${inCaution ? 4 : 10}px;">
-      <span class="stat-label" style="width: 80px;">${ENGINEERING_LABELS[key]}</span>
-      <div class="bar"><div class="bar-fill ${barClass}" style="width: ${pct}%;"></div></div>
-      <span class="stat-readout">${readout}</span>
-    </div>`;
-    // Emergency repair — only shown for a system actually in MASTER
-    // CAUTION (permanent damage not yet addressed). Paid in supplies,
-    // available anywhere (not landed-only, unlike the credits-based
-    // Repair screen under Landing Services) since the whole point is
-    // resolving a flight lockout that could strike mid-journey.
-    if (inCaution) {
-      const cost = ship[key + 'CautionCost'];
-      const canAfford = ship.supplies >= cost;
-      html += `<div class="codex-field" style="margin: 0 0 10px 0; border: 1px solid #cc0000; border-radius: 4px; padding: 6px 8px;">
-        <div style="color:#ff6666; font-size:11px; margin-bottom:4px; letter-spacing:0.5px;">⚠ PERMANENT DAMAGE — EMERGENCY REPAIR REQUIRED</div>
-        <button class="btn small" data-emergency-repair="${key}" ${canAfford ? '' : 'disabled'}>
-          ${canAfford ? `REPAIR (${cost.toFixed(0)} SUPPLY)` : 'REPAIR (INSUFFICIENT SUPPLY)'}
-        </button>
-      </div>`;
+    const barEl = document.getElementById(`eng-bar-${key}`);
+    if (barEl) {
+      barEl.style.width = pct + '%';
+      barEl.classList.toggle('crit', pct < 15);
+      barEl.classList.toggle('warn', pct >= 15 && pct < 40);
     }
+    const readoutEl = document.getElementById(`eng-readout-${key}`);
+    if (readoutEl) readoutEl.textContent = `${Math.round(current)}/${Math.round(max)}/${Math.round(base)}`;
   });
-  document.getElementById('engineering-body').innerHTML = html;
 }
 
 function repairEmergency(key) {
-  const ship = gameState.player.ship;
-  const cost = ship[key + 'CautionCost'];
-  if (ship.supplies < cost) return; // button should already be disabled in this case
-  ship.supplies -= cost;
-  ship[key] = ship[key + 'Max']; // full repair to the current ceiling (not the original base)
-  ship[key + 'Caution'] = false;
-  ship[key + 'CautionCost'] = 0;
-  showToast(`${ENGINEERING_LABELS[key].toUpperCase()} REPAIRED — -${cost.toFixed(0)} SUPPLY`);
-  renderEngineering();
-  updateHud();
+  try {
+    const ship = gameState.player.ship;
+    const cost = ship[key + 'CautionCost'];
+    if (ship.supplies < cost) return; // button should already be disabled in this case
+    ship.supplies -= cost;
+    ship[key] = ship[key + 'Max']; // full repair to the current ceiling (not the original base)
+    ship[key + 'Caution'] = false;
+    ship[key + 'CautionCost'] = 0;
+    showToast(`${ENGINEERING_LABELS[key].toUpperCase()} REPAIRED — -${cost.toFixed(0)} SUPPLY`);
+    renderEngineering();
+    updateHud();
+  } catch (err) {
+    // Same reasoning as the FOLLOW menu's error surfacing: no console
+    // access on an iPad alone, so a silent throw here would look
+    // exactly like "the button does nothing" with no way to see why.
+    showToast('REPAIR ERROR: ' + err.message);
+  }
 }
-document.getElementById('engineering-body').addEventListener('click', e => {
-  const btn = e.target.closest('[data-emergency-repair]');
-  if (btn) repairEmergency(btn.dataset.emergencyRepair);
-});
 
 document.getElementById('btn-engineering').addEventListener('click', () => {
   renderEngineering();
   document.getElementById('engineering-overlay').classList.add('visible');
 });
 document.getElementById('btn-close-engineering').addEventListener('click', () => {
-  document.getElementById('engineering-overlay').classList.remove('visible');
+  try {
+    document.getElementById('engineering-overlay').classList.remove('visible');
+  } catch (err) {
+    showToast('CLOSE ERROR: ' + err.message);
+  }
 });
 
 // Whenever gameState is replaced wholesale (load/new game/import), the
@@ -1423,6 +1493,11 @@ function syncControlButtonsToState() {
   btnBurn.classList.remove('active');
   updateMasterCautionUI(); // also sets flight-controls-enabled correctly, factoring in both location and any loaded-in caution state
   updateLandLaunchControl();
+  // Force the next Engineering render to fully rebuild rather than trust
+  // a signature left over from before this reset/load — belt-and-braces
+  // alongside the fact that the signatures would almost always differ
+  // anyway (a fresh game always starts with zero cautions).
+  engineeringLastCautionSignature = null;
   // Re-sync to wherever the (newly loaded/reset) ship actually is, so a
   // load/new-game/reset never spuriously re-shows the arrival popup for
   // a world the player was already at before this reset happened.
