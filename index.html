@@ -263,6 +263,20 @@
                               pointer events, so the dim HUD text never
                               blocks taps on the map underneath it */
   }
+  #test-btn {
+    /* Deliberately NOT display:block — #menu-btn above stays the
+       default inline-block specifically so the parent's text-align:
+       right still positions it correctly; a block child would instead
+       follow its own box model and need extra alignment tricks to land
+       in the same place. The line break onto its own row comes from an
+       explicit <br> in the markup instead (see index.html), the same
+       proven mechanism already used there, rather than introducing a
+       second way of achieving the same thing. */
+    margin-bottom: 6px;
+    pointer-events: auto;
+    border-color: var(--amber);
+    color: var(--amber);
+  }
 
   .scanline-overlay {
     position: absolute; inset: 0;
@@ -357,10 +371,11 @@
     </div>
 
     <div class="hud-corner" id="hud-top-right">
-      <button class="btn small" id="menu-btn">≡ MENU</button>
+      <button class="btn small" id="menu-btn">≡ MENU</button><br>
+      <button class="btn small" id="test-btn">🧪 TEST</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 10</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 11</div>
     </div>
 
     <div id="left-controls">
@@ -406,6 +421,21 @@
           <input type="file" id="file-import" accept="application/json" style="display:none">
         </div>
         <div class="panel-close"><button class="btn" id="btn-close-menu">CLOSE</button></div>
+      </div>
+    </div>
+
+    <!-- Test: a dev/QA menu for triggering in-game events on demand
+         without waiting for them to occur naturally — starts with just
+         "FAILURE" (forces a random permanent-damage incident, through
+         the exact same code path a real one uses), with room to grow as
+         more features need their own on-demand trigger. -->
+    <div class="overlay" id="test-overlay">
+      <div class="panel">
+        <h2>TEST MENU</h2>
+        <div class="row">
+          <button class="btn" id="btn-test-failure">⚠ FAILURE</button>
+        </div>
+        <div class="panel-close"><button class="btn" id="btn-close-test">CLOSE</button></div>
       </div>
     </div>
 
@@ -830,6 +860,19 @@ document.getElementById('btn-close-follow').addEventListener('click', () => {
 const menuOverlay = document.getElementById('menu-overlay');
 document.getElementById('menu-btn').onclick = () => menuOverlay.classList.add('visible');
 document.getElementById('btn-close-menu').onclick = () => menuOverlay.classList.remove('visible');
+
+// ---- Test menu wiring ----
+// Deliberately left open after triggering (not auto-closed) — this is a
+// repeat-use dev tool, and closing it after every click would make
+// testing several incidents in a row more friction than it needs to be.
+const testOverlay = document.getElementById('test-overlay');
+document.getElementById('test-btn').onclick = () => testOverlay.classList.add('visible');
+document.getElementById('btn-close-test').onclick = () => testOverlay.classList.remove('visible');
+document.getElementById('btn-test-failure').onclick = () => {
+  const system = Physics.forcePermanentDamage(gameState);
+  updateMasterCautionUI(); // reflect the lockout immediately, not just on the next frame
+  showToast(`TEST: FORCED PERMANENT DAMAGE — ${ENGINEERING_LABELS[system]}`);
+};
 
 // ---- Codex (directory) + world-info auto-popup ----
 // Both share one rendering function (renderCodexEntryHtml) so the Codex

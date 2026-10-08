@@ -461,6 +461,28 @@ const Physics = (() => {
   // Returns true if this call caused at least one system to newly enter
   // MASTER CAUTION (used by step() to react immediately — see there for
   // what that triggers: time-warp reset, flight lockout).
+  // Shared by the organic wear roll below AND forcePermanentDamage (the
+  // TEST menu's "Failure" button) — both funnel through this exact same
+  // code, so a forced test failure is never a parallel reimplementation
+  // that could quietly drift out of sync with what actually happens
+  // in-game. Permanently lowers `system`'s repair ceiling by
+  // `wearAmount` and flags MASTER CAUTION on it. Returns true if this
+  // call newly caused that caution (false if the system was already
+  // flagged from an earlier, still-unrepaired incident — in which case
+  // its previously-rolled cost is left alone rather than re-rolled, so
+  // the player never sees the price change out from under them for a
+  // fault they haven't addressed yet).
+  function applyPermanentDamage(ship, system, wearAmount) {
+    const maxKey = system + 'Max';
+    ship[maxKey] = Math.max(1, ship[maxKey] - wearAmount); // floored the same way current is, so a long enough run can't drive it to 0 or negative
+    ship[system] = Math.min(ship[system], ship[maxKey]); // current can never exceed its own (possibly just-lowered) ceiling
+    const cautionKey = system + 'Caution';
+    if (ship[cautionKey]) return false;
+    ship[cautionKey] = true;
+    ship[system + 'CautionCost'] = ENGINEERING_CAUTION_COST_MIN + Math.random() * (ENGINEERING_CAUTION_COST_MAX - ENGINEERING_CAUTION_COST_MIN);
+    return true;
+  }
+
   function applyEngineeringWear(ship, dt) {
     let causedNewCaution = false;
     const expectedEvents = ENGINEERING_WEAR_EVENT_RATE * dt;
@@ -473,29 +495,7 @@ const Physics = (() => {
       ship[system] = Math.max(1, ship[system] - wearAmount); // floor at 1, never fully 0 — see state.js: these represent wear/condition, not a consumable that runs out
 
       if (Math.random() < ENGINEERING_PERMANENT_DAMAGE_CHANCE) {
-        // This event also permanently lowers the repair ceiling, by the
-        // same amount — e.g. a wear tick of 5 that rolls permanent
-        // drops the ceiling from 100 to 95, same as the example this
-        // was built from. Floored the same way current is, so a long
-        // enough run can't drive a system's ceiling to 0 or negative.
-        const maxKey = system + 'Max';
-        ship[maxKey] = Math.max(1, ship[maxKey] - wearAmount);
-        // Current can never exceed its own ceiling — matters if current
-        // was already sitting at (or close to) the OLD ceiling when
-        // this event drops the ceiling below it.
-        ship[system] = Math.min(ship[system], ship[maxKey]);
-
-        // Flag MASTER CAUTION for this system. If it's already flagged
-        // (an earlier, still-unrepaired incident on the same system),
-        // leave its rolled cost alone rather than re-rolling — the
-        // player shouldn't see the price change out from under them for
-        // a fault they haven't addressed yet.
-        const cautionKey = system + 'Caution';
-        if (!ship[cautionKey]) {
-          ship[cautionKey] = true;
-          ship[system + 'CautionCost'] = ENGINEERING_CAUTION_COST_MIN + Math.random() * (ENGINEERING_CAUTION_COST_MAX - ENGINEERING_CAUTION_COST_MIN);
-          causedNewCaution = true;
-        }
+        if (applyPermanentDamage(ship, system, wearAmount)) causedNewCaution = true;
       }
     }
     return causedNewCaution;
@@ -503,6 +503,22 @@ const Physics = (() => {
 
   function hasAnyCaution(ship) {
     return ENGINEERING_SYSTEMS.some(key => ship[key + 'Caution']);
+  }
+
+  // TEST menu's "Failure" button: forces a random permanent-damage
+  // incident exactly as if it had happened organically — same wear
+  // amount roll, same ceiling/caution logic (via applyPermanentDamage
+  // above), and the same immediate time-warp-to-1x reaction a real
+  // incident gets in step(). Returns the system that was hit, so the
+  // caller can show which one in a toast.
+  function forcePermanentDamage(state) {
+    const ship = state.player.ship;
+    const system = ENGINEERING_SYSTEMS[Math.floor(Math.random() * ENGINEERING_SYSTEMS.length)];
+    const wearAmount = 1 + Math.random() * 2;
+    ship[system] = Math.max(1, ship[system] - wearAmount);
+    applyPermanentDamage(ship, system, wearAmount); // always applies the permanent component — that's the whole point of this test trigger
+    state.time.timeScale = 1;
+    return system;
   }
 
   // Ambient NPC ship traffic — purely cosmetic background flavor, not a
@@ -1099,7 +1115,7 @@ const Physics = (() => {
     nearestBody, predictTrajectory, orbitalElements, THRUST_ACCEL, bodyWorldVelocityAt,
     applySoftCapture, CAPTURE_SPEED_FRACTION,
     landingRangeFor, findLandableBody, land, launch,
-    ENGINEERING_SYSTEMS, applyEngineeringWear, hasAnyCaution,
+    ENGINEERING_SYSTEMS, applyEngineeringWear, hasAnyCaution, forcePermanentDamage,
     updateNpcShips,
   };
 })();
