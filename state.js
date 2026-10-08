@@ -421,6 +421,13 @@ function createNewGameState() {
                           // edge case from generating several missions
                           // in the same millisecond.
     },
+    npcShips: [],  // ambient background traffic — see Physics.
+                   // updateNpcShips. Deliberately NOT real orbital
+                   // mechanics (simple drifting straight-ish lines that
+                   // spawn and despawn over time) — purely cosmetic for
+                   // now, no gravity, no collision, non-hostile. Each
+                   // entry: {id, x, y, vx, vy, heading, age, maxAge}.
+    nextNpcShipId: 1, // incrementing counter for unique npc ship ids
     flags: {},
   };
 }

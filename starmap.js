@@ -111,6 +111,7 @@ const StarMap = (() => {
     if (state.player.location !== 'landed') {
       drawTrajectory(state, system, camera);
     }
+    drawNpcShips(state, camera);
     drawShip(state, camera);
     drawScanlines(w, h);
   }
@@ -257,6 +258,33 @@ const StarMap = (() => {
     ctx.textBaseline = 'bottom';
     ctx.fillText(label, p.x + 7, p.y - 4);
     ctx.restore();
+  }
+
+  // Ambient background traffic (see Physics.updateNpcShips) — the same
+  // dart shape as the player's own ship, drawn smaller and dimmer with
+  // no glow, so they read as distant/minor at a glance and never
+  // compete visually with the player's own ship. Purely decorative: no
+  // interaction with the player, bodies, or each other.
+  function drawNpcShips(state, camera) {
+    const ships = state.npcShips;
+    if (!ships || !ships.length) return;
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(102,255,102,0.38)';
+    ctx.lineWidth = 1;
+    ships.forEach(npc => {
+      const p = project(camera, npc.x, npc.y);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(npc.heading);
+      ctx.beginPath();
+      ctx.moveTo(5.5, 0);
+      ctx.lineTo(-4, 3.5);
+      ctx.lineTo(-2, 0);
+      ctx.lineTo(-4, -3.5);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    });
   }
 
   function drawShip(state, camera) {

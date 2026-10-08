@@ -461,6 +461,76 @@ const Physics = (() => {
     }
   }
 
+  // Ambient NPC ship traffic — purely cosmetic background flavor, not a
+  // simulation. Deliberately NOT real orbital mechanics (the request
+  // this was built for explicitly said accurate orbits aren't needed):
+  // each ship just drifts in roughly a straight line from a random
+  // spawn point, with a gentle random heading wobble so the paths don't
+  // read as perfectly robotic rulers, until it's lived its random
+  // lifetime or wandered out past the despawn radius — "coming and
+  // going" rather than a stable population to track. No gravity, no
+  // collision with the player or anything else, and (for now) no
+  // hostility — see index.html's rendering for the fainter, smaller
+  // triangle that visually distinguishes these from the player's ship.
+  const NPC_MAX_COUNT = 7;
+  const NPC_SPAWN_RATE = 0.05;          // expected spawns/sec of sim time while under the cap (~1 every 20s)
+  const NPC_SPEED_MIN = 8, NPC_SPEED_MAX = 25;     // Mm/s — roughly the same order of magnitude as real orbital speeds elsewhere, so they don't look absurdly fast or crawling
+  const NPC_SPAWN_RADIUS_MIN = 400, NPC_SPAWN_RADIUS_MAX = 6800; // covers from just past Aldrin out past Kryos
+  const NPC_DESPAWN_RADIUS = 8500;      // wandered well clear of the populated system — time to go
+  const NPC_MIN_LIFETIME = 120, NPC_MAX_LIFETIME = 300; // sim-seconds
+  const NPC_HEADING_DRIFT_RATE = 0.15;  // max radians/sec of random heading wobble — gentle, not a sharp turn
+
+  function spawnNpcShip(state) {
+    const spawnAngle = Math.random() * Math.PI * 2;
+    const radius = NPC_SPAWN_RADIUS_MIN + Math.random() * (NPC_SPAWN_RADIUS_MAX - NPC_SPAWN_RADIUS_MIN);
+    const travelAngle = Math.random() * Math.PI * 2;
+    const speed = NPC_SPEED_MIN + Math.random() * (NPC_SPEED_MAX - NPC_SPEED_MIN);
+    return {
+      id: 'npc' + (state.nextNpcShipId++),
+      x: Math.cos(spawnAngle) * radius,
+      y: Math.sin(spawnAngle) * radius,
+      vx: Math.cos(travelAngle) * speed,
+      vy: Math.sin(travelAngle) * speed,
+      heading: travelAngle,
+      age: 0,
+      maxAge: NPC_MIN_LIFETIME + Math.random() * (NPC_MAX_LIFETIME - NPC_MIN_LIFETIME),
+    };
+  }
+
+  function updateNpcShips(state, dt) {
+    if (dt <= 0) return;
+    const ships = state.npcShips;
+
+    // Spawning: same expected-value approach used elsewhere (engineering
+    // wear, etc.) so the long-run spawn rate stays correct regardless of
+    // time-warp — a big dt from a high warp factor can produce more than
+    // one spawn in a single step rather than silently under-spawning.
+    if (ships.length < NPC_MAX_COUNT) {
+      const expected = NPC_SPAWN_RATE * dt;
+      let spawns = Math.floor(expected);
+      if (Math.random() < expected - spawns) spawns += 1;
+      for (let i = 0; i < spawns && ships.length < NPC_MAX_COUNT; i++) {
+        ships.push(spawnNpcShip(state));
+      }
+    }
+
+    // Movement + gentle heading wobble + aging.
+    ships.forEach(npc => {
+      const turn = (Math.random() * 2 - 1) * NPC_HEADING_DRIFT_RATE * dt;
+      const speed = Math.hypot(npc.vx, npc.vy);
+      const dir = Math.atan2(npc.vy, npc.vx) + turn;
+      npc.vx = Math.cos(dir) * speed;
+      npc.vy = Math.sin(dir) * speed;
+      npc.x += npc.vx * dt;
+      npc.y += npc.vy * dt;
+      npc.heading = dir;
+      npc.age += dt;
+    });
+
+    // Despawn: aged out, or wandered too far from the populated system.
+    state.npcShips = ships.filter(npc => npc.age < npc.maxAge && Math.hypot(npc.x, npc.y) < NPC_DESPAWN_RADIUS);
+  }
+
   // Advance the ship's heading (facing angle) by dt seconds, given a
   // manual rotation input (-1, 0, or +1) and/or an active align target.
   // Manual input always takes priority and cancels any align-in-progress,
@@ -659,6 +729,11 @@ const Physics = (() => {
                                        // landed, parked ship isn't being
                                        // stressed the way active flight does.
     }
+    updateNpcShips(state, dt); // ambient background traffic — keeps
+                                 // coming and going regardless of the
+                                 // player's own flight state, since it's
+                                 // a whole-system thing, not tied to the
+                                 // player's ship specifically.
 
     state.time.simSeconds += dt;
     state.meta.playTimeSeconds += realSeconds;
@@ -966,5 +1041,6 @@ const Physics = (() => {
     applySoftCapture, CAPTURE_SPEED_FRACTION,
     landingRangeFor, findLandableBody, land, launch,
     ENGINEERING_SYSTEMS, applyEngineeringWear,
+    updateNpcShips,
   };
 })();

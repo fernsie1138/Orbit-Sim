@@ -20,7 +20,7 @@ const SaveSystem = (() => {
                                                 // isn't silently lost, not
                                                 // because the old name means
                                                 // anything going forward.
-  const CURRENT_VERSION = 12;
+  const CURRENT_VERSION = 13;
 
   function save(state) {
     state.meta.savedAt = Date.now();
@@ -217,6 +217,17 @@ const SaveSystem = (() => {
         delete camera.followShip;
       }
       v = 12;
+    }
+
+    if (v < 13) {
+      // Added ambient NPC ship traffic (state.npcShips, state.nextNpcShipId).
+      // Old saves have neither — default to no ships currently in flight
+      // and a fresh id counter; new ones will simply start spawning in.
+      if (typeof state.npcShips === 'undefined') {
+        state.npcShips = [];
+        state.nextNpcShipId = 1;
+      }
+      v = 13;
     }
 
     state.meta.version = CURRENT_VERSION;
