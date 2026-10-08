@@ -330,7 +330,7 @@
       <button class="btn small" id="menu-btn">≡ MENU</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 8</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 9</div>
     </div>
 
     <div id="left-controls">
@@ -1054,17 +1054,24 @@ function renderRepair() {
   let html = '';
   ENGINEERING_ORDER.forEach(key => {
     const current = ship[key];
-    const max = ship[key + 'Max'];
+    const max = ship[key + 'Max']; // current repair ceiling — this, not base, is what Repair can reach
+    const base = ship[key + 'Base']; // original/design rating, shown for reference only
     const needed = Math.max(0, max - current);
     const fullCost = needed * price;
     const affordableUnits = gameState.player.credits / price;
     const canAffordFull = affordableUnits >= needed;
+    const permanentlyDamaged = max < base;
+    // "FULL" alone would misleadingly read as "back to 100" once a
+    // system's ceiling has been permanently lowered — label that case
+    // distinctly so it's clear this is as good as it currently gets,
+    // not a full recovery.
+    let buttonLabel;
+    if (needed <= 0) buttonLabel = permanentlyDamaged ? 'AT CEILING' : 'FULL';
+    else buttonLabel = canAffordFull ? `REPAIR (${fullCost.toFixed(0)} CR)` : 'REPAIR (PARTIAL — LOW CREDITS)';
     html += `<div class="codex-field">
-      <div class="codex-field-label">${ENGINEERING_LABELS[key]} — ${Math.round(current)}/${Math.round(max)} — ${price.toFixed(2)} CR/POINT</div>
+      <div class="codex-field-label">${ENGINEERING_LABELS[key]} — ${Math.round(current)}/${Math.round(max)}/${Math.round(base)} — ${price.toFixed(2)} CR/POINT</div>
       <div class="codex-field-body">
-        <button class="btn small" data-repair="${key}" ${needed <= 0 ? 'disabled' : ''}>
-          ${needed <= 0 ? 'FULL' : (canAffordFull ? `REPAIR (${fullCost.toFixed(0)} CR)` : 'REPAIR (PARTIAL — LOW CREDITS)')}
-        </button>
+        <button class="btn small" data-repair="${key}" ${needed <= 0 ? 'disabled' : ''}>${buttonLabel}</button>
       </div>
     </div>`;
   });
@@ -1239,15 +1246,20 @@ function renderEngineering() {
   let html = '';
   ENGINEERING_ORDER.forEach(key => {
     const current = ship[key];
-    const max = ship[key + 'Max'];
+    const max = ship[key + 'Max']; // current repair ceiling
+    const base = ship[key + 'Base']; // original/design rating
     const pct = Math.max(0, Math.min(100, (current / max) * 100));
     let barClass = '';
     if (pct < 15) barClass = 'crit';
     else if (pct < 40) barClass = 'warn';
+    // Always three numbers — current/ceiling/original — per spec, even
+    // when undamaged (reads as "100/100/100" until permanent damage
+    // ever knocks the middle number down).
+    const readout = `${Math.round(current)}/${Math.round(max)}/${Math.round(base)}`;
     html += `<div class="stat-row" style="margin-bottom: 10px;">
       <span class="stat-label" style="width: 80px;">${ENGINEERING_LABELS[key]}</span>
       <div class="bar"><div class="bar-fill ${barClass}" style="width: ${pct}%;"></div></div>
-      <span class="stat-readout">${Math.round(current)}/${Math.round(max)}</span>
+      <span class="stat-readout">${readout}</span>
     </div>`;
   });
   document.getElementById('engineering-body').innerHTML = html;

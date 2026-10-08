@@ -449,6 +449,13 @@ const Physics = (() => {
   const ENGINEERING_WEAR_EVENT_RATE = 0.005; // events/sec of sim time WHILE FLYING (5x the original 0.001)
   const ENGINEERING_SYSTEMS = ['engine', 'reactor', 'hull', 'nav', 'cooler'];
 
+  // Chance that any given wear event is PERMANENT — it also lowers that
+  // system's repair ceiling (<key>Max), not just its current value — so
+  // Repair can never fully undo it. Picked at the middle of the
+  // requested 5-10% range; most wear (the other ~92.5%) is purely
+  // temporary, fully repairable, exactly as before.
+  const ENGINEERING_PERMANENT_DAMAGE_CHANCE = 0.075;
+
   function applyEngineeringWear(ship, dt) {
     const expectedEvents = ENGINEERING_WEAR_EVENT_RATE * dt;
     let events = Math.floor(expectedEvents);
@@ -458,6 +465,20 @@ const Physics = (() => {
       const system = ENGINEERING_SYSTEMS[Math.floor(Math.random() * ENGINEERING_SYSTEMS.length)];
       const wearAmount = 1 + Math.random() * 2; // 1-3 points, averaging ~2
       ship[system] = Math.max(1, ship[system] - wearAmount); // floor at 1, never fully 0 — see state.js: these represent wear/condition, not a consumable that runs out
+
+      if (Math.random() < ENGINEERING_PERMANENT_DAMAGE_CHANCE) {
+        // This event also permanently lowers the repair ceiling, by the
+        // same amount — e.g. a wear tick of 5 that rolls permanent
+        // drops the ceiling from 100 to 95, same as the example this
+        // was built from. Floored the same way current is, so a long
+        // enough run can't drive a system's ceiling to 0 or negative.
+        const maxKey = system + 'Max';
+        ship[maxKey] = Math.max(1, ship[maxKey] - wearAmount);
+        // Current can never exceed its own ceiling — matters if current
+        // was already sitting at (or close to) the OLD ceiling when
+        // this event drops the ceiling below it.
+        ship[system] = Math.min(ship[system], ship[maxKey]);
+      }
     }
   }
 

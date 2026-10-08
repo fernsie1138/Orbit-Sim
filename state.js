@@ -372,21 +372,33 @@ function createNewGameState() {
         oxygenMax: 100,
         supplies: 100,
         suppliesMax: 100,
-        // Engineering systems: hull plus four more, each 1-100 (never 0 —
-        // these represent wear/condition, not a consumable that can run
-        // fully out) — see Physics.applyEngineeringWear for how they
-        // degrade, and the ENGINEERING screen (replacing the old simple
-        // hull bar) in index.html for how they're shown.
-        hull: 100,
-        hullMax: 100,
-        engine: 100,
-        engineMax: 100,
-        reactor: 100,
-        reactorMax: 100,
-        nav: 100,
-        navMax: 100,
-        cooler: 100,
-        coolerMax: 100,
+        // Engineering systems: hull plus four more, each tracked with
+        // THREE numbers, not two — see Physics.applyEngineeringWear for
+        // how they degrade, and the ENGINEERING screen (replacing the
+        // old simple hull bar) in index.html for how they're shown
+        // ("60/95/100" style):
+        //   <key>      — current condition (1-100+, never 0 — this
+        //                represents wear/condition, not a consumable
+        //                that can run fully out). TEMPORARY damage.
+        //   <key>Max   — the current REPAIR CEILING: what Repair can
+        //                bring it back up to right now. Most wear only
+        //                lowers this system's current value and leaves
+        //                the ceiling alone (fully repairable); a
+        //                smaller fraction of wear events are PERMANENT
+        //                and lower this ceiling too, so repair can
+        //                never fully undo them.
+        //   <key>Base  — the system's original/design rating (100 for
+        //                every stock component right now). Never
+        //                reduced by damage — only relevant once better-
+        //                than-stock components can be installed later,
+        //                at which point it'd rise above 100. Shown
+        //                purely for reference (the display's third
+        //                number), not used in any calculation yet.
+        hull: 100, hullMax: 100, hullBase: 100,
+        engine: 100, engineMax: 100, engineBase: 100,
+        reactor: 100, reactorMax: 100, reactorBase: 100,
+        nav: 100, navMax: 100, navBase: 100,
+        cooler: 100, coolerMax: 100, coolerBase: 100,
         name: 'Wanderer',
       },
     },

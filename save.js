@@ -20,7 +20,7 @@ const SaveSystem = (() => {
                                                 // isn't silently lost, not
                                                 // because the old name means
                                                 // anything going forward.
-  const CURRENT_VERSION = 13;
+  const CURRENT_VERSION = 14;
 
   function save(state) {
     state.meta.savedAt = Date.now();
@@ -228,6 +228,20 @@ const SaveSystem = (() => {
         state.nextNpcShipId = 1;
       }
       v = 13;
+    }
+
+    if (v < 14) {
+      // Added a third Engineering number per system — <key>Base, the
+      // original/design rating (see state.js). Old saves only have
+      // <key>/<key>Max — default Base to 100 for each of the five
+      // systems, matching every stock component's original rating.
+      const ship = state.player && state.player.ship;
+      if (ship && typeof ship.hullBase === 'undefined') {
+        ['hull', 'engine', 'reactor', 'nav', 'cooler'].forEach(key => {
+          ship[key + 'Base'] = 100;
+        });
+      }
+      v = 14;
     }
 
     state.meta.version = CURRENT_VERSION;
