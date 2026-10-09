@@ -150,6 +150,12 @@
     color: var(--green);
   }
   #landing-hud .panel-label { color: var(--green-dim); font-size: 10px; letter-spacing: 2px; margin-bottom: 4px; }
+  /* Descent-rate safety indicator — color is set dynamically per-frame
+     in updateLandingSequenceHud (green/amber/red for clean/hard/
+     catastrophic), these are just the three fixed colors it switches
+     between, plus a text-shadow glow matching how this game already
+     treats colored status text (e.g. MASTER CAUTION). */
+  #landing-rate-status { font-weight: bold; margin-top: 2px; }
   #landing-controls {
     position: absolute;
     right: 14px; bottom: 70px;
@@ -160,14 +166,30 @@
     pointer-events: auto;
   }
   #landing-controls .panel-label { color: var(--amber); }
+  #landing-controls-row { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
   #landing-controls-grid {
     display: grid;
     grid-template-columns: 52px 52px 52px;
     gap: 6px;
-    margin-top: 6px;
   }
   #landing-controls-grid .btn { padding: 10px 4px; font-size: 16px; }
-  #landing-controls-grid .btn.wide { grid-column: span 1; font-size: 10px; letter-spacing: 1px; }
+  /* The sliding throttle, vertical to read like a real throttle lever.
+     -webkit-appearance: slider-vertical is WebKit's native mechanism
+     for this and is all that's needed on the iPad Safari this game
+     targets; writing-mode is kept alongside as a non-WebKit fallback,
+     harmless where the WebKit property already applies. */
+  #landing-throttle-container { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  #landing-throttle-label { font-size: 12px; color: var(--amber); letter-spacing: 1px; min-width: 34px; text-align: center; }
+  #landing-throttle-slider {
+    -webkit-appearance: slider-vertical;
+    writing-mode: vertical-lr;
+    direction: rtl;
+    width: 30px;
+    height: 112px;
+    accent-color: var(--amber);
+    touch-action: manipulation;
+  }
+  #landing-throttle-caption { font-size: 9px; color: var(--green-dim); letter-spacing: 1px; }
   #control-panel .panel-label {
     font-size: 9px;
     letter-spacing: 2px;
@@ -446,7 +468,7 @@
       <button class="btn small" id="test-btn">🧪 TEST</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 17</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 18</div>
     </div>
 
     <div id="left-controls">
@@ -483,17 +505,31 @@
       <div class="panel-label" id="landing-hud-label">DESCENT</div>
       <div id="landing-altitude">ALTITUDE: —</div>
       <div id="landing-rate">RATE: —</div>
+      <div id="landing-rate-status">—</div>
       <div id="landing-offset">DRIFT: —</div>
     </div>
 
     <div id="landing-controls">
       <div class="panel-label" id="landing-controls-label">DESCENT CONTROL</div>
-      <div id="landing-controls-grid">
-        <div></div><button class="btn" id="btn-land-up" title="Up">▲</button><div></div>
-        <button class="btn" id="btn-land-left" title="Left">◀</button>
-        <button class="btn wide" id="btn-land-thrust" title="Thrust">🔥 THRUST</button>
-        <button class="btn" id="btn-land-right" title="Right">▶</button>
-        <div></div><button class="btn" id="btn-land-down" title="Down">▼</button><div></div>
+      <div id="landing-controls-row">
+        <div id="landing-controls-grid">
+          <div></div><button class="btn" id="btn-land-up" title="Up">▲</button><div></div>
+          <button class="btn" id="btn-land-left" title="Left">◀</button>
+          <button class="btn" id="btn-land-thrust" title="Thrust">🔥</button>
+          <button class="btn" id="btn-land-right" title="Right">▶</button>
+          <div></div><button class="btn" id="btn-land-down" title="Down">▼</button><div></div>
+        </div>
+        <!-- The sliding throttle used during LANDING — launch keeps the
+             tap-to-toggle btn-land-thrust above instead (see
+             enterLandingSequenceUI, which shows exactly one of the two
+             depending on the sequence's mode). A native range input
+             rather than a custom-built slider: reliable touch dragging
+             on iOS for free, no gesture-handling code to get wrong. -->
+        <div id="landing-throttle-container">
+          <div id="landing-throttle-label">0%</div>
+          <input type="range" id="landing-throttle-slider" min="0" max="100" value="0" step="1" aria-label="Descent throttle">
+          <div id="landing-throttle-caption">THROTTLE</div>
+        </div>
       </div>
     </div>
 
@@ -733,8 +769,18 @@ function forceReleaseHeldControls() {
     btnRotateLeft.classList.remove('active');
     btnRotateRight.classList.remove('active');
   }
-  // Same safety net for the landing/launch sequence's own held controls.
-  ['up', 'down', 'left', 'right', 'thrust'].forEach(key => {
+  // Same safety net for the landing/launch sequence's own held
+  // directional controls — deliberately NOT thrust: thrust is never a
+  // held-press control that can get "stuck on" the way these four are
+  // (it's a slider during landing, which just sits wherever the user
+  // left it, and a tap-to-toggle during launching, which is meant to
+  // stay on until explicitly tapped off). Including it here used to be
+  // a real bug: pointerup bubbles to `document` from ANY button, so
+  // releasing so much as a directional thruster during launch would
+  // fire this handler and incorrectly reset the thrust toggle back to
+  // off mid-ascent, even though nothing about the player's actual
+  // thrust input had changed.
+  ['up', 'down', 'left', 'right'].forEach(key => {
     if (heldLandingControls[key]) {
       heldLandingControls[key] = false;
       const el = document.getElementById('btn-land-' + key);
@@ -758,48 +804,50 @@ bindHold(btnBurn,
   () => { heldControls.thrust = false; btnBurn.classList.remove('active'); });
 
 // ---- Landing/launch sequence controls — same held-button idiom as
-// normal flight, completely separate control set and state object
-// (heldLandingControls, not heldControls) since this is a different
-// mode with different physics (see landing.js), not an extension of
-// normal flight controls.
+// normal flight for the four directional thrusters, completely separate
+// control set and state object (heldLandingControls, not heldControls)
+// since this is a different mode with different physics (see
+// landing.js), not an extension of normal flight controls.
 //
-// THRUST is the one exception: during LANDING it stays a held control
-// (braking genuinely needs to be switched on and off in real time as
-// you manage descent rate), but during LAUNCHING the optimal strategy
-// is just "thrust the entire way up" with no reason to ever let go —
-// confirmed when this was first built and tuned (the launch autopilot
-// used in testing holds thrust the whole sequence). Making someone
-// physically hold a button down for a 15-50 second launch for no
-// strategic reason is pure friction, so launching gets a TAP-TO-TOGGLE
-// thrust button instead, mirroring the existing PROGRADE/RETROGRADE
-// toggle buttons' look and feel (tap on, tap off, .active shows state).
-// Both behaviors stay attached to the same button permanently, each
-// gated on the sequence's current mode, rather than attaching/detaching
-// handlers each time a sequence starts.
-const heldLandingControls = { up: false, down: false, left: false, right: false, thrust: false };
+// THRUST is handled differently in each mode, through two entirely
+// separate UI elements that are shown/hidden by mode (see
+// enterLandingSequenceUI) rather than one element trying to serve both:
+//  - LANDING uses a sliding throttle (0-100%, #landing-throttle-slider)
+//    — braking genuinely needs fine, continuously-variable control as
+//    you manage descent rate, not just on/off.
+//  - LAUNCHING keeps a TAP-TO-TOGGLE button (#btn-land-thrust) — the
+//    optimal launch strategy is just "thrust the entire way up" with no
+//    reason to ever vary it (confirmed when this was first tuned: the
+//    launch autopilot used in testing holds thrust at 100% the whole
+//    sequence), so a full throttle UI would be pure overhead; a single
+//    tap to go to 100% and stay there is simpler and mirrors the
+//    existing PROGRADE/RETROGRADE toggle buttons' feel.
+// Both write the SAME underlying heldLandingControls.thrust (a 0-1
+// fraction, not a boolean — see landing.js), so Landing.stepSequence
+// never needs to know or care which UI produced the value.
+const heldLandingControls = { up: false, down: false, left: false, right: false, thrust: 0 };
 function bindLandingHold(id, key) {
   const el = document.getElementById(id);
   bindHold(el,
-    () => {
-      if (key === 'thrust' && gameState.landingSequence && gameState.landingSequence.mode === 'launching') return; // toggle handles this instead
-      heldLandingControls[key] = true; el.classList.add('active');
-    },
-    () => {
-      if (key === 'thrust' && gameState.landingSequence && gameState.landingSequence.mode === 'launching') return;
-      heldLandingControls[key] = false; el.classList.remove('active');
-    });
+    () => { heldLandingControls[key] = true; el.classList.add('active'); },
+    () => { heldLandingControls[key] = false; el.classList.remove('active'); });
 }
 bindLandingHold('btn-land-up', 'up');
 bindLandingHold('btn-land-down', 'down');
 bindLandingHold('btn-land-left', 'left');
 bindLandingHold('btn-land-right', 'right');
-bindLandingHold('btn-land-thrust', 'thrust');
 
 const btnLandThrust = document.getElementById('btn-land-thrust');
 btnLandThrust.addEventListener('click', () => {
-  if (!gameState.landingSequence || gameState.landingSequence.mode !== 'launching') return; // held-press handles landing instead
-  heldLandingControls.thrust = !heldLandingControls.thrust;
-  btnLandThrust.classList.toggle('active', heldLandingControls.thrust);
+  heldLandingControls.thrust = heldLandingControls.thrust > 0 ? 0 : 1;
+  btnLandThrust.classList.toggle('active', heldLandingControls.thrust > 0);
+});
+
+const landingThrottleSlider = document.getElementById('landing-throttle-slider');
+const landingThrottleLabel = document.getElementById('landing-throttle-label');
+landingThrottleSlider.addEventListener('input', () => {
+  heldLandingControls.thrust = Number(landingThrottleSlider.value) / 100;
+  landingThrottleLabel.textContent = landingThrottleSlider.value + '%';
 });
 
 // ---- Align prograde/retrograde: these SET a target the ship steers
@@ -920,12 +968,17 @@ function enterLandingSequenceUI() {
   document.getElementById('landing-hud-label').textContent = label;
   document.getElementById('landing-controls-label').textContent = label + ' CONTROL';
   // Always start a fresh sequence with thrust off, regardless of
-  // whichever interaction model (held for landing, toggle for
+  // whichever interaction model (slider for landing, toggle for
   // launching) governs it this time — avoids carrying a stray "on"
   // state over from whatever the previous sequence left behind.
-  heldLandingControls.thrust = false;
+  heldLandingControls.thrust = 0;
   btnLandThrust.classList.remove('active');
-  btnLandThrust.textContent = seq.mode === 'launching' ? '🔥 THRUST (TAP)' : '🔥 THRUST';
+  landingThrottleSlider.value = 0;
+  landingThrottleLabel.textContent = '0%';
+  // Show exactly one of the two thrust controls for this mode.
+  const isLaunching = seq.mode === 'launching';
+  btnLandThrust.style.display = isLaunching ? '' : 'none';
+  document.getElementById('landing-throttle-container').style.display = isLaunching ? 'none' : '';
 }
 
 function exitLandingSequenceUI() {
@@ -937,11 +990,38 @@ function exitLandingSequenceUI() {
   document.getElementById('landing-controls').classList.remove('active');
 }
 
+// Classifies a CURRENT (in-progress, not yet final) descent rate against
+// the same thresholds the actual landing outcome is scored against
+// (Landing.SAFE_DESCENT_RATE / HARD_LANDING_RATE), so the HUD indicator
+// is always telling the truth about what would happen if you touched
+// down RIGHT NOW at this rate — not a separate, approximate guess at it.
+// Only meaningful for LANDING: launch's descent rate runs negative
+// (climbing away) and was deliberately never scored on speed at all
+// (see landing.js's finishSequence), so there's no "soft landing" zone
+// to be inside or outside of while ascending.
+function getDescentSafetyStatus(seq) {
+  if (seq.mode !== 'landing') return null;
+  const rate = seq.descentRate;
+  if (rate <= Landing.SAFE_DESCENT_RATE) return { label: 'SAFE FOR LANDING', color: 'var(--green)' };
+  if (rate <= Landing.HARD_LANDING_RATE) return { label: 'TOO FAST — WILL DAMAGE HULL', color: 'var(--amber)' };
+  return { label: 'DANGER — CATASTROPHIC IMPACT', color: '#ff3333' };
+}
+
 function updateLandingSequenceHud() {
   const seq = gameState.landingSequence;
   document.getElementById('landing-altitude').textContent = `ALTITUDE: ${Math.round(seq.altitude)}`;
   document.getElementById('landing-rate').textContent = `RATE: ${seq.descentRate.toFixed(1)}`;
   document.getElementById('landing-offset').textContent = `DRIFT: ${Math.round(seq.lateralX)}, ${Math.round(seq.lateralY)}`;
+
+  const statusEl = document.getElementById('landing-rate-status');
+  const status = getDescentSafetyStatus(seq);
+  if (status) {
+    statusEl.textContent = status.label;
+    statusEl.style.color = status.color;
+    statusEl.style.textShadow = `0 0 6px ${status.color}`;
+  } else {
+    statusEl.textContent = '';
+  }
 }
 
 // Applies the consequences of a finished sequence's outcome (hull

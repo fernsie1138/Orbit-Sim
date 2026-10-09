@@ -29,7 +29,7 @@ const Landing = (() => {
   const SAFE_DESCENT_RATE = 25;       // touch down at or under this: no damage
   const HARD_LANDING_RATE = 60;       // above this: catastrophic, not just "hard"
   const GRAVITY_ACCEL = 8;            // pulls descent rate up (toward the ground) every second
-  const THRUST_DECEL = 20;            // main thruster's effect on descent rate when held
+  const THRUST_DECEL = 20;            // main thruster's full-throttle (100%) effect on descent rate — see stepSequence, which scales this by the current throttle fraction
   const LATERAL_THRUST_ACCEL = 15;    // directional thrusters' effect on lateral drift velocity
   const LATERAL_DAMPING = 0.3;        // natural bleed-off of lateral velocity per second (per unit of velocity) — keeps drift correctable, not purely chaotic
   const WIND_MAX = 10;                // max magnitude of the ambient drift force
@@ -90,10 +90,13 @@ const Landing = (() => {
     return WIND_RETARGET_MIN + Math.random() * (WIND_RETARGET_MAX - WIND_RETARGET_MIN);
   }
 
-  // controls: { up, down, left, right, thrust } — all booleans, "held
-  // this frame." Directional thrusters affect lateral drift; thrust
-  // affects descent rate, same for both modes — "thrust" always means
-  // "fight gravity, slow down the fall / speed up the climb."
+  // controls: { up, down, left, right, thrust }. The four directional
+  // fields are booleans, "held this frame," and affect lateral drift.
+  // thrust is a THROTTLE FRACTION from 0 (off) to 1 (full), not a
+  // boolean — a sliding throttle for landing, though launch's
+  // tap-to-toggle control still just drives it to a plain 0 or 1. It
+  // always means the same thing in both modes: "fight gravity, slow the
+  // fall / speed the climb," scaled by how far open the throttle is.
   function stepSequence(seq, dt, controls) {
     if (!seq.active || dt <= 0) return;
 
@@ -127,7 +130,11 @@ const Landing = (() => {
     // Descent rate: gravity always pulls it up (toward the ground);
     // thrust always fights that, regardless of mode.
     seq.descentRate += GRAVITY_ACCEL * dt;
-    if (controls.thrust) seq.descentRate -= THRUST_DECEL * dt;
+    // Clamp defensively — a slider can't produce an out-of-range value,
+    // but this keeps the physics correct even if something upstream
+    // ever passes a bad number.
+    const throttle = Math.max(0, Math.min(1, controls.thrust || 0));
+    seq.descentRate -= THRUST_DECEL * throttle * dt;
 
     // descentRate's sign always means the same thing regardless of mode
     // (positive = currently moving toward the ground, negative = moving
