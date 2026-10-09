@@ -468,7 +468,7 @@
       <button class="btn small" id="test-btn">🧪 TEST</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 20</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 21</div>
     </div>
 
     <div id="left-controls">
@@ -949,13 +949,20 @@ function updateLandLaunchControl() {
 // interactive sequence is being developed landing-first and will be
 // revisited for launch separately later.
 btnLandLaunch.addEventListener('click', () => {
-  if (gameState.landingSequence) return; // defensive: button's container is hidden during a sequence, but never allow a second one to stack on a stray double-tap
+  // A frozen (inactive) landingSequence normally sits here the whole
+  // time the ship is landed now (see finishLandingSequence/the main
+  // loop) — only an ACTIVE one should block this click; a truthy-only
+  // check here would have silently broken the LAUNCH button for the
+  // entire time the ship is landed, every time, caught while wiring
+  // this up.
+  if (gameState.landingSequence && gameState.landingSequence.active) return; // defensive: button's container is hidden during an active sequence, but never allow a second one to stack on a stray double-tap
   const system = getCurrentSystem(gameState);
   if (gameState.player.location === 'landed') {
     const body = Physics.findBody(system, gameState.player.landedBodyId);
     const name = body ? body.name.toUpperCase() : 'ORBIT';
     Physics.launch(gameState);
     setFlightControlsEnabled(true);
+    gameState.landingSequence = null; // back in open space — nothing to stay parked on, return to the normal top-down map
     showToast(`LAUNCHED — IN ORBIT AROUND ${name}`);
     updateLandLaunchControl();
   } else {
@@ -994,8 +1001,17 @@ function enterLandingSequenceUI() {
   landingThrottleSlider.value = 0;
   landingThrottleLabel.textContent = '0%';
   // Show exactly one of the two thrust controls for this mode.
+  // btnLandThrust uses visibility (not display) when hidden — it's a
+  // CHILD of #landing-controls-grid (the cross-shaped directional pad),
+  // and display:none removes a grid item from layout entirely, which
+  // left the grid auto-reflowing UP/LEFT/RIGHT/DOWN around the gap and
+  // visibly throwing the cross shape off-center. visibility:hidden
+  // still reserves its cell (keeping the cross correctly shaped) while
+  // staying invisible and non-interactive. The throttle container is a
+  // separate sibling OUTSIDE the grid, so display:none is fine there —
+  // nothing else depends on its layout space being reserved.
   const isLaunching = seq.mode === 'launching';
-  btnLandThrust.style.display = isLaunching ? '' : 'none';
+  btnLandThrust.style.visibility = isLaunching ? '' : 'hidden';
   document.getElementById('landing-throttle-container').style.display = isLaunching ? 'none' : '';
 }
 
@@ -1105,15 +1121,26 @@ function finishLandingSequence() {
     }
     const summary = outcomeMessages.length ? outcomeMessages.join(' — ') : 'CLEAN TOUCHDOWN';
     showToast(`LANDED AT ${bodyName} — ${summary}`);
+    // Deliberately NOT clearing gameState.landingSequence here — it's
+    // left frozen (active:false, altitude 0, whatever lateral drift the
+    // ship had at the exact moment of touchdown) so the main loop keeps
+    // rendering the wireframe pad view, with the ship sitting exactly
+    // where it actually touched down, rather than cutting away to the
+    // normal top-down map and snapping position/view discontinuously.
+    // That discontinuity was the cause of a real reported bug ("the
+    // ship seems to slide sideways" on landing) — the old flow zeroed
+    // this out and jumped straight to an entirely different view, which
+    // is jarring if the ship had any residual drift at touchdown; now
+    // there's simply nothing to jump to or reset.
   } else {
     Physics.launch(gameState);
     setFlightControlsEnabled(true);
     const summary = outcomeMessages.length ? outcomeMessages.join(' — ') : 'CLEAN DEPARTURE';
     showToast(`LAUNCHED FROM ${bodyName} — ${summary}`);
+    gameState.landingSequence = null; // back in open space — nothing to stay parked on
   }
 
-  gameState.landingSequence = null;
-  exitLandingSequenceUI();
+  exitLandingSequenceUI(); // restores the NORMAL flight HUD/control-panel either way — see the main loop for which canvas view accompanies them
   updateLandLaunchControl();
   updateMasterCautionUI();
 }
@@ -2111,7 +2138,26 @@ function loop(now) {
     }
   } else {
     Physics.step(gameState, realDt, heldControls);
-    StarMap.draw(gameState);
+    if (gameState.player.location === 'landed') {
+      // Stay on the wireframe pad view while landed rather than cutting
+      // to the normal top-down map — with all the normal flight
+      // HUD/menus (Job Board, Landing Services, etc.) still available
+      // over it via exitLandingSequenceUI, called once when the
+      // sequence actually finished (see finishLandingSequence), not
+      // every frame here. landingSequence is normally still here, frozen
+      // at touchdown, from finishing the sequence this session — but a
+      // save loaded directly into an already-landed state wouldn't have
+      // one, so synthesize a parked one lazily rather than require every
+      // possible path into 'landed' to have created it beforehand.
+      if (!gameState.landingSequence) {
+        gameState.landingSequence = Landing.createSequence('landing', gameState.player.landedBodyId);
+        gameState.landingSequence.altitude = 0;
+        gameState.landingSequence.active = false;
+      }
+      StarMap.drawLandingSequence(gameState);
+    } else {
+      StarMap.draw(gameState);
+    }
     updateHud();
     updateLandLaunchControl();
     updateMasterCautionUI();
