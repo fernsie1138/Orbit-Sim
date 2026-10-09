@@ -12,7 +12,18 @@
     --bg: #000000;
     --amber: #ffb000;
   }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  /* user-select: none alone stops a visible selection highlight from
+     forming, but iOS Safari's long-press "Copy/Paste" callout is
+     governed by a SEPARATE property, -webkit-touch-callout, which this
+     rule was missing — that's exactly the gap that let holding a button
+     down catch the surrounding panel/label area (plain divs and spans,
+     not buttons) and bring the callout up anyway, even with selection
+     itself already disabled everywhere. Applied to every element so
+     nothing new can slip through unstyled later; the pilot-name <input>
+     is explicitly exempted below so typing/editing there still works
+     normally. */
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-touch-callout: none; }
+  input, textarea { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
   html, body {
     margin: 0; padding: 0; width: 100%; height: 100%;
     background: #000;
@@ -70,23 +81,6 @@
   .bar-fill.warn { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
   .bar-fill.crit { background: #ff3333; box-shadow: 0 0 6px #ff3333; }
 
-  /* Applied to every button in the game (via the bare tag selector, not
-     just .btn) so nothing needs individual opt-in and nothing new can
-     slip through unstyled later: this game leans on sustained PRESS-AND-
-     HOLD for most of its controls (burn, rotate, the landing sequence's
-     thrusters), which is exactly what triggers iOS's text-selection
-     magnifier and copy/lookup callout on a plain button otherwise — the
-     "text becomes live" interference. user-select alone doesn't fully
-     stop it on iOS; -webkit-touch-callout is the one that actually
-     suppresses that popup specifically. Harmless everywhere else — the
-     only genuinely selectable text in this game is the pilot name
-     <input>, which isn't a <button> and is untouched by this rule. */
-  button {
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    user-select: none;
-    -webkit-touch-callout: none;
-  }
   .btn {
     font-family: inherit;
     background: rgba(0,20,0,0.7);
@@ -428,7 +422,7 @@
       <button class="btn small" id="test-btn">🧪 TEST</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 15</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 16</div>
     </div>
 
     <div id="left-controls">
