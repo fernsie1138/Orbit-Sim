@@ -12,18 +12,42 @@
     --bg: #000000;
     --amber: #ffb000;
   }
-  /* user-select: none alone stops a visible selection highlight from
-     forming, but iOS Safari's long-press "Copy/Paste" callout is
-     governed by a SEPARATE property, -webkit-touch-callout, which this
-     rule was missing — that's exactly the gap that let holding a button
-     down catch the surrounding panel/label area (plain divs and spans,
-     not buttons) and bring the callout up anyway, even with selection
-     itself already disabled everywhere. Applied to every element so
-     nothing new can slip through unstyled later; the pilot-name <input>
-     is explicitly exempted below so typing/editing there still works
-     normally. */
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-touch-callout: none; }
-  input, textarea { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+  /* Selection/callout suppression, comprehensively. Two real gaps found
+     the hard way, both now closed:
+     1) user-select: none (unprefixed) alone doesn't stop iOS Safari's
+        long-press "Copy/Paste" callout — that's a separate property,
+        -webkit-touch-callout, needed in addition.
+     2) The unprefixed, standard `user-select` is NOT reliably enough on
+        iOS Safari by itself — -webkit-user-select (vendor-prefixed) is
+        often the one that actually governs it there, particularly for
+        glyph/emoji/symbol characters like the arrow and flame icons
+        this game uses as button content. An earlier pass here had
+        -webkit-user-select on a button-specific rule, then DROPPED it
+        when that rule was "cleaned up" as apparently-redundant once a
+        broader rule was added — it wasn't actually redundant, and that
+        is exactly what let icons and surrounding areas stay selectable
+        even after selection was supposedly disabled everywhere.
+     Applied to every element so nothing new can slip through unstyled
+     later; the pilot-name <input> is explicitly exempted below so
+     typing/editing there still works normally. A JS-level backstop
+     (selectstart/contextmenu prevention, see the script below) backs
+     this up too, rather than trusting CSS alone a third time. */
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  input, textarea {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
   html, body {
     margin: 0; padding: 0; width: 100%; height: 100%;
     background: #000;
@@ -422,7 +446,7 @@
       <button class="btn small" id="test-btn">🧪 TEST</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 16</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 17</div>
     </div>
 
     <div id="left-controls">
@@ -644,6 +668,26 @@ if (gameState.camera.zoom === 1 && gameState.meta.savedAt === null) {
   gameState.camera.y = 0;
 }
 
+// JS-level backstop for selection/callout suppression, on top of the
+// CSS in the <style> block above — CSS alone has now missed this twice
+// (once for a property that needed a vendor prefix on iOS, once for a
+// property CSS doesn't even have equivalent control over in all cases),
+// so this isn't trusted to carry the whole job alone a third time.
+// selectstart is the event that fires right as a selection is about to
+// start forming (from a long-press or drag) — preventing it stops the
+// selection outright regardless of which CSS property iOS happens to be
+// honoring for a given element/character. contextmenu is the long-press
+// menu itself on platforms that fire it as a distinct event. Both are
+// let through normally on the pilot-name input/textarea, which should
+// keep behaving like an ordinary text field.
+['selectstart', 'contextmenu'].forEach(evt => {
+  document.addEventListener(evt, (e) => {
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    e.preventDefault();
+  });
+});
+
 Input.init(canvas, gameState, () => {}); // camera mutates gameState directly
 
 // ---- Flight controls: rotate + burn are HELD (pressed/released), not
@@ -718,18 +762,45 @@ bindHold(btnBurn,
 // (heldLandingControls, not heldControls) since this is a different
 // mode with different physics (see landing.js), not an extension of
 // normal flight controls.
+//
+// THRUST is the one exception: during LANDING it stays a held control
+// (braking genuinely needs to be switched on and off in real time as
+// you manage descent rate), but during LAUNCHING the optimal strategy
+// is just "thrust the entire way up" with no reason to ever let go —
+// confirmed when this was first built and tuned (the launch autopilot
+// used in testing holds thrust the whole sequence). Making someone
+// physically hold a button down for a 15-50 second launch for no
+// strategic reason is pure friction, so launching gets a TAP-TO-TOGGLE
+// thrust button instead, mirroring the existing PROGRADE/RETROGRADE
+// toggle buttons' look and feel (tap on, tap off, .active shows state).
+// Both behaviors stay attached to the same button permanently, each
+// gated on the sequence's current mode, rather than attaching/detaching
+// handlers each time a sequence starts.
 const heldLandingControls = { up: false, down: false, left: false, right: false, thrust: false };
 function bindLandingHold(id, key) {
   const el = document.getElementById(id);
   bindHold(el,
-    () => { heldLandingControls[key] = true; el.classList.add('active'); },
-    () => { heldLandingControls[key] = false; el.classList.remove('active'); });
+    () => {
+      if (key === 'thrust' && gameState.landingSequence && gameState.landingSequence.mode === 'launching') return; // toggle handles this instead
+      heldLandingControls[key] = true; el.classList.add('active');
+    },
+    () => {
+      if (key === 'thrust' && gameState.landingSequence && gameState.landingSequence.mode === 'launching') return;
+      heldLandingControls[key] = false; el.classList.remove('active');
+    });
 }
 bindLandingHold('btn-land-up', 'up');
 bindLandingHold('btn-land-down', 'down');
 bindLandingHold('btn-land-left', 'left');
 bindLandingHold('btn-land-right', 'right');
 bindLandingHold('btn-land-thrust', 'thrust');
+
+const btnLandThrust = document.getElementById('btn-land-thrust');
+btnLandThrust.addEventListener('click', () => {
+  if (!gameState.landingSequence || gameState.landingSequence.mode !== 'launching') return; // held-press handles landing instead
+  heldLandingControls.thrust = !heldLandingControls.thrust;
+  btnLandThrust.classList.toggle('active', heldLandingControls.thrust);
+});
 
 // ---- Align prograde/retrograde: these SET a target the ship steers
 // toward every frame (see Physics.stepAttitude) rather than an instant
@@ -848,6 +919,13 @@ function enterLandingSequenceUI() {
   const label = seq.mode === 'landing' ? 'DESCENT' : 'ASCENT';
   document.getElementById('landing-hud-label').textContent = label;
   document.getElementById('landing-controls-label').textContent = label + ' CONTROL';
+  // Always start a fresh sequence with thrust off, regardless of
+  // whichever interaction model (held for landing, toggle for
+  // launching) governs it this time — avoids carrying a stray "on"
+  // state over from whatever the previous sequence left behind.
+  heldLandingControls.thrust = false;
+  btnLandThrust.classList.remove('active');
+  btnLandThrust.textContent = seq.mode === 'launching' ? '🔥 THRUST (TAP)' : '🔥 THRUST';
 }
 
 function exitLandingSequenceUI() {
