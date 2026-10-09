@@ -386,24 +386,88 @@ const StarMap = (() => {
     ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
 
-    // Target ring at the far end of the corridor — the landing zone
-    // (or, for launch, the point you're climbing away from) — shrinking
-    // toward the vanishing point as the sequence nears completion.
+    // Landing pad at the far end of the corridor — a double-bordered
+    // square frame with a crosshair and a center target circle, plus
+    // four corner marker lights (blue left, red right), sized off
+    // Landing.LANDING_ZONE_RADIUS so the pad's drawn edge actually
+    // represents where the real lateral tolerance is, not just
+    // decoration. Scales up with perspective like everything else as
+    // the ship approaches — EXCEPT the center circle, which is
+    // deliberately clamped to never exceed a fraction of the screen.
+    // Without that clamp, perspective (scale = FOCAL / distance) blows
+    // up without bound as distance approaches zero, and the one thing
+    // that absolutely must stay visible and on-screen through
+    // touchdown — the actual target point — would instead balloon past
+    // the edges right when it matters most.
     const targetDist = Landing.MAX_ALTITUDE - shipProgress;
-    if (targetDist > 3) {
-      ctx.strokeStyle = '#ffaa00';
-      ctx.shadowColor = '#ffaa00';
-      ctx.shadowBlur = 8;
+    // Draws all the way down to touchdown (targetDist reaches exactly 0
+    // there, never negative — Landing.stepSequence floors altitude at
+    // 0) — unlike the old unclamped target ring, there's no longer a
+    // need to hide this as distance approaches zero: the center circle
+    // is clamped above, and project()'s own internal distance floor
+    // keeps the rest numerically sane even at zero range.
+    if (targetDist >= 0) {
+      const padOuterHalf = Landing.LANDING_ZONE_RADIUS;
+      const padInnerHalf = padOuterHalf * 0.85;
+      const padCenterRadius = padOuterHalf * 0.15;
+      const cornerLightRadius = padOuterHalf * 0.07;
+      const cornerInset = padOuterHalf * 0.08; // corner lights sit just outside the outer frame's corners
+
       ctx.lineWidth = 2;
-      const steps = 28;
+      ctx.strokeStyle = '#ffffff';
+      ctx.shadowColor = '#ffffff';
+      ctx.shadowBlur = 6;
+
+      // Outer square frame.
+      drawProjectedSquare(padOuterHalf, targetDist);
+      // Inner square frame (the double-border look).
+      drawProjectedSquare(padInnerHalf, targetDist);
+
+      // Crosshair, spanning the inner square.
       ctx.beginPath();
-      for (let i = 0; i <= steps; i++) {
-        const ang = (i / steps) * Math.PI * 2;
-        const p = project(Math.cos(ang) * Landing.LANDING_ZONE_RADIUS, Math.sin(ang) * Landing.LANDING_ZONE_RADIUS, targetDist);
-        if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
-      }
+      let p1 = project(-padInnerHalf, 0, targetDist), p2 = project(padInnerHalf, 0, targetDist);
+      ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+      p1 = project(0, -padInnerHalf, targetDist); p2 = project(0, padInnerHalf, targetDist);
+      ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+
+      // Center target circle — the one element clamped to stay fully
+      // on-screen at any altitude, touchdown included.
+      const centerProj = project(0, 0, targetDist);
+      const maxCenterScreenRadius = Math.min(w, h) * 0.35;
+      const centerScreenRadius = Math.min(padCenterRadius * centerProj.scale, maxCenterScreenRadius);
+      ctx.beginPath();
+      ctx.arc(centerProj.x, centerProj.y, centerScreenRadius, 0, Math.PI * 2);
       ctx.stroke();
       ctx.shadowBlur = 0;
+
+      // Four corner marker lights — blue on the left (matching pad
+      // orientation, not screen side, so they track drift correctly),
+      // red on the right.
+      [[-1, -1, '#3366ff'], [1, -1, '#ff3333'], [-1, 1, '#3366ff'], [1, 1, '#ff3333']].forEach(([sx, sy, color]) => {
+        const corner = project(sx * (padOuterHalf + cornerInset), sy * (padOuterHalf + cornerInset), targetDist);
+        ctx.strokeStyle = color;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.arc(corner.x, corner.y, Math.max(2, cornerLightRadius * centerProj.scale), 0, Math.PI * 2);
+        ctx.stroke();
+      });
+      ctx.shadowBlur = 0;
+    }
+
+    function drawProjectedSquare(half, distAhead) {
+      const corners = [
+        project(-half, -half, distAhead),
+        project(half, -half, distAhead),
+        project(half, half, distAhead),
+        project(-half, half, distAhead),
+      ];
+      ctx.beginPath();
+      ctx.moveTo(corners[0].x, corners[0].y);
+      for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i].x, corners[i].y);
+      ctx.closePath();
+      ctx.stroke();
     }
 
     // Center crosshair — the ship's own fixed reference point; drift

@@ -468,7 +468,7 @@
       <button class="btn small" id="test-btn">🧪 TEST</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 18</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 20</div>
     </div>
 
     <div id="left-controls">
@@ -507,6 +507,7 @@
       <div id="landing-rate">RATE: —</div>
       <div id="landing-rate-status">—</div>
       <div id="landing-offset">DRIFT: —</div>
+      <div id="landing-fuel">FUEL: —</div>
     </div>
 
     <div id="landing-controls">
@@ -826,6 +827,11 @@ bindHold(btnBurn,
 // fraction, not a boolean — see landing.js), so Landing.stepSequence
 // never needs to know or care which UI produced the value.
 const heldLandingControls = { up: false, down: false, left: false, right: false, thrust: 0 };
+// 10% of the normal space-flight burn rate — thrusting during descent
+// is a much smaller maneuver than a full burn in open space, and
+// draws from the very same tank (see the main loop, where this is
+// actually applied to ship.fuel).
+const LANDING_FUEL_BURN_RATE = Physics.FUEL_BURN_RATE * 0.10;
 function bindLandingHold(id, key) {
   const el = document.getElementById(id);
   bindHold(el,
@@ -935,23 +941,35 @@ function updateLandLaunchControl() {
   document.getElementById('btn-landing-services').disabled = gameState.player.location !== 'landed';
 }
 
-// ---- Landing/launch sequence: pressing LAND or LAUNCH now starts the
-// interactive descent/ascent sequence (see landing.js) instead of
-// instantly teleporting the ship — the actual Physics.land()/launch()
-// call, and all its consequences, happen once the sequence finishes
-// (finishLandingSequence below), not here.
+// ---- Landing: pressing LAND starts the interactive descent sequence
+// (see landing.js) instead of instantly teleporting the ship — the
+// actual Physics.land() call, and all its consequences, happen once the
+// sequence finishes (finishLandingSequence below), not here. LAUNCH, for
+// now, stays the plain instant transition it always was — the
+// interactive sequence is being developed landing-first and will be
+// revisited for launch separately later.
 btnLandLaunch.addEventListener('click', () => {
   if (gameState.landingSequence) return; // defensive: button's container is hidden during a sequence, but never allow a second one to stack on a stray double-tap
   const system = getCurrentSystem(gameState);
   if (gameState.player.location === 'landed') {
-    const bodyId = gameState.player.landedBodyId;
-    gameState.landingSequence = Landing.createSequence('launching', bodyId);
-    enterLandingSequenceUI();
+    const body = Physics.findBody(system, gameState.player.landedBodyId);
+    const name = body ? body.name.toUpperCase() : 'ORBIT';
+    Physics.launch(gameState);
+    setFlightControlsEnabled(true);
+    showToast(`LAUNCHED — IN ORBIT AROUND ${name}`);
+    updateLandLaunchControl();
   } else {
     const landableId = btnLandLaunch.dataset.landableId;
     const body = landableId ? Physics.findBody(system, landableId) : null;
     if (!body) return; // button should be disabled in this case, but don't act on stale data
-    gameState.landingSequence = Landing.createSequence('landing', body.id);
+    // A full cargo hold makes the ship effectively heavier for the
+    // descent — more pull from gravity, less deceleration per unit of
+    // thrust (see landing.js) — computed once here, at the moment the
+    // sequence starts, since cargo can't change mid-descent.
+    const ship = gameState.player.ship;
+    const cargoFraction = ship.cargoCapacity > 0 ? ship.cargoUsed / ship.cargoCapacity : 0;
+    const massMultiplier = 1 + cargoFraction * Landing.CARGO_MASS_PENALTY;
+    gameState.landingSequence = Landing.createSequence('landing', body.id, massMultiplier);
     enterLandingSequenceUI();
   }
 });
@@ -1009,9 +1027,17 @@ function getDescentSafetyStatus(seq) {
 
 function updateLandingSequenceHud() {
   const seq = gameState.landingSequence;
+  const ship = gameState.player.ship;
   document.getElementById('landing-altitude').textContent = `ALTITUDE: ${Math.round(seq.altitude)}`;
   document.getElementById('landing-rate').textContent = `RATE: ${seq.descentRate.toFixed(1)}`;
   document.getElementById('landing-offset').textContent = `DRIFT: ${Math.round(seq.lateralX)}, ${Math.round(seq.lateralY)}`;
+
+  const fuelEl = document.getElementById('landing-fuel');
+  fuelEl.textContent = `FUEL: ${Math.round(ship.fuel)}/${ship.fuelMax}`;
+  const fuelPct = ship.fuelMax > 0 ? (ship.fuel / ship.fuelMax) * 100 : 0;
+  const fuelColor = fuelPct < 15 ? '#ff3333' : (fuelPct < 40 ? 'var(--amber)' : 'var(--green)');
+  fuelEl.style.color = fuelColor;
+  fuelEl.style.textShadow = fuelPct < 40 ? `0 0 6px ${fuelColor}` : '';
 
   const statusEl = document.getElementById('landing-rate-status');
   const status = getDescentSafetyStatus(seq);
@@ -2059,7 +2085,23 @@ function loop(now) {
     // this finishes, so there's nothing for the normal physics to do.
     // The game clock itself still ticks forward at the same 1x rate so
     // it doesn't visibly freeze for the sequence's duration.
-    Landing.stepSequence(gameState.landingSequence, realDt, heldLandingControls);
+    // Thrust during descent burns from the SAME fuel tank as normal
+    // flight, just at a much lower rate (LANDING_FUEL_BURN_RATE, 10% of
+    // Physics.FUEL_BURN_RATE) — computed here, not inside landing.js,
+    // since fuel is ship state and landing.js deliberately knows
+    // nothing about the ship. Running dry mid-descent isn't a special
+    // case to handle separately: thrust is simply capped at whatever
+    // the remaining fuel can actually supply this frame (0 once it's
+    // gone), so stepSequence always sees an honest, physically
+    // consistent value rather than a throttle setting fuel can't back.
+    const ship = gameState.player.ship;
+    const requestedThrottle = Math.max(0, Math.min(1, heldLandingControls.thrust || 0));
+    const fuelNeeded = LANDING_FUEL_BURN_RATE * requestedThrottle * realDt;
+    const throttle = fuelNeeded > ship.fuel
+      ? (LANDING_FUEL_BURN_RATE * realDt > 0 ? ship.fuel / (LANDING_FUEL_BURN_RATE * realDt) : 0)
+      : requestedThrottle;
+    ship.fuel = Math.max(0, ship.fuel - LANDING_FUEL_BURN_RATE * throttle * realDt);
+    Landing.stepSequence(gameState.landingSequence, realDt, { ...heldLandingControls, thrust: throttle });
     gameState.time.simSeconds += realDt;
     gameState.meta.playTimeSeconds += realDt;
     StarMap.drawLandingSequence(gameState);

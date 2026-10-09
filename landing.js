@@ -64,12 +64,29 @@ const Landing = (() => {
   // descent rate starts at 0 and gravity pulls it up) or 'launching'
   // (altitude 0 -> MAX_ALTITUDE, same gravity, but now working against
   // the climb instead of causing it — see applyControls/stepSequence).
-  function createSequence(mode, bodyId) {
+  // CARGO_MASS_PENALTY: how much harder a FULLY loaded hold (cargoUsed
+  // == cargoCapacity) makes the descent, as a fraction added to 1.0 —
+  // 0.5 means a full hold behaves as if the ship were 1.5x its own
+  // mass. Applied as a single fixed multiplier for the whole sequence,
+  // computed from the ship's load at the moment it's created (see
+  // massMultiplier below) — cargo can't be loaded or jettisoned mid-
+  // descent, so there's no need to recompute this every frame.
+  const CARGO_MASS_PENALTY = 0.5;
+
+  // massMultiplier: how loaded the ship is for THIS sequence, as 1.0
+  // (empty) up to 1 + CARGO_MASS_PENALTY (completely full) — the caller
+  // (index.html, which actually owns ship.cargoUsed/cargoCapacity)
+  // computes this and passes it in; landing.js has no idea what a
+  // "cargo unit" is and shouldn't need to. Defaults to 1 (no penalty)
+  // if omitted, so existing callers/tests that don't pass it keep
+  // behaving exactly as before.
+  function createSequence(mode, bodyId, massMultiplier) {
     const windTarget = randomWindTarget();
     return {
       active: true,
       mode,                 // 'landing' | 'launching'
       bodyId,
+      massMultiplier: massMultiplier || 1,
       altitude: mode === 'landing' ? MAX_ALTITUDE : 0,
       descentRate: 0,        // positive = moving toward the ground, regardless of mode
       lateralX: 0, lateralY: 0,
@@ -128,13 +145,17 @@ const Landing = (() => {
     seq.lateralY += seq.lateralVY * dt;
 
     // Descent rate: gravity always pulls it up (toward the ground);
-    // thrust always fights that, regardless of mode.
-    seq.descentRate += GRAVITY_ACCEL * dt;
+    // thrust always fights that, regardless of mode. A loaded ship
+    // (massMultiplier > 1) falls under MORE effective gravity AND gets
+    // LESS deceleration per unit of thrust — the same engines pushing
+    // against more mass — so the compound effect of a full hold is
+    // substantially harder to brake, not just mildly so.
+    seq.descentRate += GRAVITY_ACCEL * seq.massMultiplier * dt;
     // Clamp defensively — a slider can't produce an out-of-range value,
     // but this keeps the physics correct even if something upstream
     // ever passes a bad number.
     const throttle = Math.max(0, Math.min(1, controls.thrust || 0));
-    seq.descentRate -= THRUST_DECEL * throttle * dt;
+    seq.descentRate -= (THRUST_DECEL / seq.massMultiplier) * throttle * dt;
 
     // descentRate's sign always means the same thing regardless of mode
     // (positive = currently moving toward the ground, negative = moving
@@ -196,7 +217,7 @@ const Landing = (() => {
 
   return {
     MAX_ALTITUDE, LANDING_ZONE_RADIUS, SAFE_DESCENT_RATE, HARD_LANDING_RATE,
-    GATE_COUNT, GATE_SIZE,
+    GATE_COUNT, GATE_SIZE, CARGO_MASS_PENALTY,
     getGateDistances, createSequence, stepSequence,
   };
 })();

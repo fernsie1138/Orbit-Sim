@@ -1116,6 +1116,6 @@ const Physics = (() => {
     applySoftCapture, CAPTURE_SPEED_FRACTION,
     landingRangeFor, findLandableBody, land, launch,
     ENGINEERING_SYSTEMS, applyEngineeringWear, hasAnyCaution, forcePermanentDamage,
-    updateNpcShips,
+    updateNpcShips, FUEL_BURN_RATE,
   };
 })();
