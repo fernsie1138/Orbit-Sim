@@ -473,6 +473,17 @@ function createNewGameState() {
                    // now, no gravity, no collision, non-hostile. Each
                    // entry: {id, x, y, vx, vy, heading, age, maxAge}.
     nextNpcShipId: 1, // incrementing counter for unique npc ship ids
+    landingSequence: null, // the interactive descent/ascent mini-sequence
+                            // (see Landing.createSequence/stepSequence)
+                            // currently in progress, or null when flying
+                            // normally. While non-null, the main loop
+                            // steps THIS instead of normal ship physics —
+                            // see index.html's loop(). Not meant to
+                            // survive a save/reload mid-sequence (there's
+                            // no real harm if it does — the sequence
+                            // just resumes — but it's a short enough
+                            // interaction that this was never a design
+                            // concern worth extra handling).
     flags: {},
   };
 }

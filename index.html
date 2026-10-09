@@ -97,6 +97,42 @@
     background: rgba(0,10,0,0.55);
     pointer-events: auto;
   }
+
+  /* Landing/launch sequence HUD + controls — hidden by default, shown
+     only while a sequence is active (see updateLandingSequenceUI),
+     positioned to replace the normal HUD/control-panel in the same
+     screen regions rather than stacking alongside them. */
+  #landing-hud, #landing-controls { display: none; }
+  #landing-hud.active, #landing-controls.active { display: block; }
+  #landing-hud {
+    position: absolute;
+    top: 0; left: 0;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.6;
+    letter-spacing: 0.5px;
+    text-shadow: 0 0 6px rgba(51,255,51,0.6);
+    color: var(--green);
+  }
+  #landing-hud .panel-label { color: var(--green-dim); font-size: 10px; letter-spacing: 2px; margin-bottom: 4px; }
+  #landing-controls {
+    position: absolute;
+    right: 14px; bottom: 70px;
+    padding: 8px;
+    border: 1px solid var(--amber);
+    border-radius: 6px;
+    background: rgba(10,6,0,0.55);
+    pointer-events: auto;
+  }
+  #landing-controls .panel-label { color: var(--amber); }
+  #landing-controls-grid {
+    display: grid;
+    grid-template-columns: 52px 52px 52px;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  #landing-controls-grid .btn { padding: 10px 4px; font-size: 16px; }
+  #landing-controls-grid .btn.wide { grid-column: span 1; font-size: 10px; letter-spacing: 1px; }
   #control-panel .panel-label {
     font-size: 9px;
     letter-spacing: 2px;
@@ -375,7 +411,7 @@
       <button class="btn small" id="test-btn">🧪 TEST</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 13</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 14</div>
     </div>
 
     <div id="left-controls">
@@ -400,6 +436,29 @@
         <button class="btn" id="btn-align-retrograde" title="Align Retrograde">RETRO<br>GRADE</button>
         <button class="btn wide" id="btn-land-launch" title="Land / Launch" disabled>LAND</button>
         <button class="btn wide" id="btn-landing-services" title="Landing Services" disabled>LANDING SERVICES</button>
+      </div>
+    </div>
+
+    <!-- Landing/launch sequence: its own HUD + controls, shown ONLY
+         while gameState.landingSequence is active, entirely replacing
+         the normal flight HUD/controls for the duration (see
+         updateLandingSequenceUI in the script below). Not skippable —
+         there's no close/cancel button here by design. -->
+    <div id="landing-hud">
+      <div class="panel-label" id="landing-hud-label">DESCENT</div>
+      <div id="landing-altitude">ALTITUDE: —</div>
+      <div id="landing-rate">RATE: —</div>
+      <div id="landing-offset">DRIFT: —</div>
+    </div>
+
+    <div id="landing-controls">
+      <div class="panel-label" id="landing-controls-label">DESCENT CONTROL</div>
+      <div id="landing-controls-grid">
+        <div></div><button class="btn" id="btn-land-up" title="Up">▲</button><div></div>
+        <button class="btn" id="btn-land-left" title="Left">◀</button>
+        <button class="btn wide" id="btn-land-thrust" title="Thrust">🔥 THRUST</button>
+        <button class="btn" id="btn-land-right" title="Right">▶</button>
+        <div></div><button class="btn" id="btn-land-down" title="Down">▼</button><div></div>
       </div>
     </div>
 
@@ -550,6 +609,7 @@
 <script src="codex.js"></script>
 <script src="economy.js"></script>
 <script src="missions.js"></script>
+<script src="landing.js"></script>
 <script src="physics.js"></script>
 <script src="save.js"></script>
 <script src="starmap.js"></script>
@@ -618,6 +678,14 @@ function forceReleaseHeldControls() {
     btnRotateLeft.classList.remove('active');
     btnRotateRight.classList.remove('active');
   }
+  // Same safety net for the landing/launch sequence's own held controls.
+  ['up', 'down', 'left', 'right', 'thrust'].forEach(key => {
+    if (heldLandingControls[key]) {
+      heldLandingControls[key] = false;
+      const el = document.getElementById('btn-land-' + key);
+      if (el) el.classList.remove('active');
+    }
+  });
 }
 document.addEventListener('pointerup', forceReleaseHeldControls);
 document.addEventListener('pointercancel', forceReleaseHeldControls);
@@ -633,6 +701,24 @@ bindHold(btnRotateRight,
 bindHold(btnBurn,
   () => { heldControls.thrust = true; btnBurn.classList.add('active'); },
   () => { heldControls.thrust = false; btnBurn.classList.remove('active'); });
+
+// ---- Landing/launch sequence controls — same held-button idiom as
+// normal flight, completely separate control set and state object
+// (heldLandingControls, not heldControls) since this is a different
+// mode with different physics (see landing.js), not an extension of
+// normal flight controls.
+const heldLandingControls = { up: false, down: false, left: false, right: false, thrust: false };
+function bindLandingHold(id, key) {
+  const el = document.getElementById(id);
+  bindHold(el,
+    () => { heldLandingControls[key] = true; el.classList.add('active'); },
+    () => { heldLandingControls[key] = false; el.classList.remove('active'); });
+}
+bindLandingHold('btn-land-up', 'up');
+bindLandingHold('btn-land-down', 'down');
+bindLandingHold('btn-land-left', 'left');
+bindLandingHold('btn-land-right', 'right');
+bindLandingHold('btn-land-thrust', 'thrust');
 
 // ---- Align prograde/retrograde: these SET a target the ship steers
 // toward every frame (see Physics.stepAttitude) rather than an instant
@@ -719,30 +805,123 @@ function updateLandLaunchControl() {
   document.getElementById('btn-landing-services').disabled = gameState.player.location !== 'landed';
 }
 
+// ---- Landing/launch sequence: pressing LAND or LAUNCH now starts the
+// interactive descent/ascent sequence (see landing.js) instead of
+// instantly teleporting the ship — the actual Physics.land()/launch()
+// call, and all its consequences, happen once the sequence finishes
+// (finishLandingSequence below), not here.
 btnLandLaunch.addEventListener('click', () => {
+  if (gameState.landingSequence) return; // defensive: button's container is hidden during a sequence, but never allow a second one to stack on a stray double-tap
   const system = getCurrentSystem(gameState);
   if (gameState.player.location === 'landed') {
-    const body = Physics.findBody(system, gameState.player.landedBodyId);
-    const name = body ? body.name.toUpperCase() : 'ORBIT';
-    Physics.launch(gameState);
-    setFlightControlsEnabled(true);
-    showToast(`LAUNCHED — IN ORBIT AROUND ${name}`);
+    const bodyId = gameState.player.landedBodyId;
+    gameState.landingSequence = Landing.createSequence('launching', bodyId);
+    enterLandingSequenceUI();
   } else {
     const landableId = btnLandLaunch.dataset.landableId;
     const body = landableId ? Physics.findBody(system, landableId) : null;
     if (!body) return; // button should be disabled in this case, but don't act on stale data
+    gameState.landingSequence = Landing.createSequence('landing', body.id);
+    enterLandingSequenceUI();
+  }
+});
+
+function enterLandingSequenceUI() {
+  const seq = gameState.landingSequence;
+  document.getElementById('hud-top-left').style.display = 'none';
+  document.getElementById('hud-top-right').style.display = 'none';
+  document.getElementById('left-controls').style.display = 'none';
+  document.getElementById('control-panel').style.display = 'none';
+  document.getElementById('landing-hud').classList.add('active');
+  document.getElementById('landing-controls').classList.add('active');
+  const label = seq.mode === 'landing' ? 'DESCENT' : 'ASCENT';
+  document.getElementById('landing-hud-label').textContent = label;
+  document.getElementById('landing-controls-label').textContent = label + ' CONTROL';
+}
+
+function exitLandingSequenceUI() {
+  document.getElementById('hud-top-left').style.display = '';
+  document.getElementById('hud-top-right').style.display = '';
+  document.getElementById('left-controls').style.display = '';
+  document.getElementById('control-panel').style.display = '';
+  document.getElementById('landing-hud').classList.remove('active');
+  document.getElementById('landing-controls').classList.remove('active');
+}
+
+function updateLandingSequenceHud() {
+  const seq = gameState.landingSequence;
+  document.getElementById('landing-altitude').textContent = `ALTITUDE: ${Math.round(seq.altitude)}`;
+  document.getElementById('landing-rate').textContent = `RATE: ${seq.descentRate.toFixed(1)}`;
+  document.getElementById('landing-offset').textContent = `DRIFT: ${Math.round(seq.lateralX)}, ${Math.round(seq.lateralY)}`;
+}
+
+// Applies the consequences of a finished sequence's outcome (hull
+// damage, credit fees, a real Engineering permanent-damage incident for
+// a catastrophic landing) and returns the list of human-readable
+// messages describing what happened, WITHOUT showing a toast itself —
+// the caller combines these with its own "landed at X" / "N jobs
+// complete" messages into one toast, the same reasoning as
+// checkMissionCompletionOnLanding: showToast only holds one message at
+// a time, so whichever fired first would otherwise be silently dropped.
+function applyLandingOutcome(seq) {
+  const outcome = seq.outcome;
+  const ship = gameState.player.ship;
+  const messages = [];
+
+  if (outcome.severity === 'hard') {
+    const excess = outcome.descentRate - Landing.SAFE_DESCENT_RATE;
+    const damage = Math.max(1, Math.round(excess * 0.8));
+    ship.hull = Math.max(1, ship.hull - damage);
+    messages.push(`HARD LANDING — HULL -${damage}`);
+  } else if (outcome.severity === 'catastrophic') {
+    const excess = outcome.descentRate - Landing.HARD_LANDING_RATE;
+    const damage = Math.round(40 + excess * 0.6);
+    ship.hull = Math.max(1, ship.hull - damage);
+    const hitSystem = Physics.forcePermanentDamage(gameState);
+    messages.push(`CATASTROPHIC LANDING — HULL -${damage}, ${ENGINEERING_LABELS[hitSystem].toUpperCase()} DAMAGED`);
+  }
+
+  if (outcome.missedZone) {
+    const missExcess = outcome.missDistance - Landing.LANDING_ZONE_RADIUS;
+    const fee = Math.round(missExcess * 5);
+    const hullDamage = Math.max(1, Math.round(missExcess * 0.15));
+    gameState.player.credits = Math.max(0, gameState.player.credits - fee);
+    ship.hull = Math.max(1, ship.hull - hullDamage);
+    messages.push(`MISSED ZONE — FEE ${formatCredits(fee)} CR, HULL -${hullDamage}`);
+  }
+
+  return messages;
+}
+
+function finishLandingSequence() {
+  const seq = gameState.landingSequence;
+  const system = getCurrentSystem(gameState);
+  const body = Physics.findBody(system, seq.bodyId); // resolved BEFORE launch clears landedBodyId
+  const outcomeMessages = applyLandingOutcome(seq);
+  const bodyName = body ? body.name.toUpperCase() : 'UNKNOWN';
+
+  if (seq.mode === 'landing') {
     Physics.land(gameState, body);
     setFlightControlsEnabled(false);
     const missionResult = checkMissionCompletionOnLanding(body.id);
     if (missionResult.completedCount > 0) {
       const plural = missionResult.completedCount > 1 ? 'S' : '';
-      showToast(`LANDED AT ${body.name.toUpperCase()} — ${missionResult.completedCount} JOB${plural} COMPLETE (+${formatCredits(missionResult.totalPayment)} CR)`);
-    } else {
-      showToast(`LANDED AT ${body.name.toUpperCase()}`);
+      outcomeMessages.push(`${missionResult.completedCount} JOB${plural} COMPLETE (+${formatCredits(missionResult.totalPayment)} CR)`);
     }
+    const summary = outcomeMessages.length ? outcomeMessages.join(' — ') : 'CLEAN TOUCHDOWN';
+    showToast(`LANDED AT ${bodyName} — ${summary}`);
+  } else {
+    Physics.launch(gameState);
+    setFlightControlsEnabled(true);
+    const summary = outcomeMessages.length ? outcomeMessages.join(' — ') : 'CLEAN DEPARTURE';
+    showToast(`LAUNCHED FROM ${bodyName} — ${summary}`);
   }
+
+  gameState.landingSequence = null;
+  exitLandingSequenceUI();
   updateLandLaunchControl();
-});
+  updateMasterCautionUI();
+}
 
 // ---- Pause ----
 const btnPause = document.getElementById('btn-pause');
@@ -1545,6 +1724,15 @@ function syncControlButtonsToState() {
   btnBurn.classList.remove('active');
   updateMasterCautionUI(); // also sets flight-controls-enabled correctly, factoring in both location and any loaded-in caution state
   updateLandLaunchControl();
+  // A loaded save could in principle have been captured mid-sequence
+  // (e.g. the autosave-on-background hook firing during one) — make
+  // sure the visible UI actually matches that, rather than leaving
+  // whatever was on screen before this load/reset happened.
+  if (gameState.landingSequence && gameState.landingSequence.active) {
+    enterLandingSequenceUI();
+  } else {
+    exitLandingSequenceUI();
+  }
   // Force the next Engineering render to fully rebuild rather than trust
   // a signature left over from before this reset/load — belt-and-braces
   // alongside the fact that the signatures would almost always differ
@@ -1694,12 +1882,30 @@ function loop(now) {
   const realDt = Math.min(0.1, (now - lastTime) / 1000); // clamp for tab-switch stalls
   lastTime = now;
 
-  Physics.step(gameState, realDt, heldControls);
-  StarMap.draw(gameState);
-  updateHud();
-  updateLandLaunchControl();
-  updateMasterCautionUI();
-  checkWorldArrival();
+  if (gameState.landingSequence && gameState.landingSequence.active) {
+    // The sequence runs on its own real-time clock, deliberately NOT
+    // scaled by time-warp (not skippable, not speed-up-able) and
+    // deliberately NOT going through Physics.step at all — ship
+    // position/velocity in the main star system are irrelevant until
+    // this finishes, so there's nothing for the normal physics to do.
+    // The game clock itself still ticks forward at the same 1x rate so
+    // it doesn't visibly freeze for the sequence's duration.
+    Landing.stepSequence(gameState.landingSequence, realDt, heldLandingControls);
+    gameState.time.simSeconds += realDt;
+    gameState.meta.playTimeSeconds += realDt;
+    StarMap.drawLandingSequence(gameState);
+    updateLandingSequenceHud();
+    if (!gameState.landingSequence.active) {
+      finishLandingSequence(); // just completed this very frame
+    }
+  } else {
+    Physics.step(gameState, realDt, heldControls);
+    StarMap.draw(gameState);
+    updateHud();
+    updateLandLaunchControl();
+    updateMasterCautionUI();
+    checkWorldArrival();
+  }
 
   requestAnimationFrame(loop);
 }

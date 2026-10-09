@@ -327,6 +327,99 @@ const StarMap = (() => {
     ctx.fillRect(0, 0, w, h);
   }
 
+  // The interactive landing/launch sequence's own view — a perspective
+  // wireframe corridor (square "gates" receding into the distance, a
+  // target ring marking the landing zone) replacing the normal top-down
+  // starmap entirely while a sequence is active. Deliberately simple
+  // perspective math (no 3D engine, no matrices) — each gate is just a
+  // square at a known lateral offset and distance-ahead; projecting a
+  // point to screen space is one divide-by-distance per corner, the
+  // same technique behind classic vector tunnel effects.
+  function drawLandingSequence(state) {
+    const seq = state.landingSequence;
+    if (!seq) return;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    const cx = w / 2, cy = h / 2;
+    const FOCAL = 520; // tunes field-of-view feel — higher = narrower/more zoomed-in tunnel
+
+    ctx.fillStyle = '#000a00';
+    ctx.fillRect(0, 0, w, h);
+
+    // How far the ship has traveled along the corridor from its START
+    // (0) toward its END (Landing.MAX_ALTITUDE) — increasing
+    // monotonically regardless of mode, even though "altitude" itself
+    // counts down for landing and up for launching. This is what lets
+    // every gate/target be positioned and projected with one shared
+    // formula instead of two mirrored ones.
+    const shipProgress = seq.mode === 'landing' ? (Landing.MAX_ALTITUDE - seq.altitude) : seq.altitude;
+
+    function project(worldX, worldY, distAhead) {
+      const d = Math.max(1, distAhead);
+      const scale = FOCAL / d;
+      return { x: cx + (worldX - seq.lateralX) * scale, y: cy + (worldY - seq.lateralY) * scale, scale };
+    }
+
+    // Gates: purely visual waypoints giving a sense of speed/depth —
+    // skip any already behind the ship (distAhead <= a hair above 0) or
+    // so close they'd blow up to an unreadable size.
+    ctx.strokeStyle = '#33ff33';
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = '#33ff33';
+    ctx.shadowBlur = 6;
+    Landing.getGateDistances().forEach(gateDist => {
+      const distAhead = gateDist - shipProgress;
+      if (distAhead <= 3) return;
+      const half = Landing.GATE_SIZE;
+      const corners = [
+        project(-half, -half, distAhead),
+        project(half, -half, distAhead),
+        project(half, half, distAhead),
+        project(-half, half, distAhead),
+      ];
+      ctx.globalAlpha = Math.max(0.25, Math.min(1, 1.3 - distAhead / Landing.MAX_ALTITUDE));
+      ctx.beginPath();
+      ctx.moveTo(corners[0].x, corners[0].y);
+      for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i].x, corners[i].y);
+      ctx.closePath();
+      ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+
+    // Target ring at the far end of the corridor — the landing zone
+    // (or, for launch, the point you're climbing away from) — shrinking
+    // toward the vanishing point as the sequence nears completion.
+    const targetDist = Landing.MAX_ALTITUDE - shipProgress;
+    if (targetDist > 3) {
+      ctx.strokeStyle = '#ffaa00';
+      ctx.shadowColor = '#ffaa00';
+      ctx.shadowBlur = 8;
+      ctx.lineWidth = 2;
+      const steps = 28;
+      ctx.beginPath();
+      for (let i = 0; i <= steps; i++) {
+        const ang = (i / steps) * Math.PI * 2;
+        const p = project(Math.cos(ang) * Landing.LANDING_ZONE_RADIUS, Math.sin(ang) * Landing.LANDING_ZONE_RADIUS, targetDist);
+        if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+
+    // Center crosshair — the ship's own fixed reference point; drift
+    // shows up as the gates/target moving AWAY from this, not this
+    // moving (the ship is always drawn dead-center, consistent with
+    // this being a first-person view out the front of it).
+    ctx.strokeStyle = '#a6ffa6';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - 12, cy); ctx.lineTo(cx - 4, cy);
+    ctx.moveTo(cx + 4, cy); ctx.lineTo(cx + 12, cy);
+    ctx.moveTo(cx, cy - 12); ctx.lineTo(cx, cy - 4);
+    ctx.moveTo(cx, cy + 4); ctx.lineTo(cx, cy + 12);
+    ctx.stroke();
+  }
+
   // Screen-space -> world-space, used for tap-to-select bodies later.
   function screenToWorld(camera, sx, sy) {
     const scale = BASE_SCALE / camera.zoom;
@@ -338,5 +431,5 @@ const StarMap = (() => {
     };
   }
 
-  return { init, resize, draw, project, screenToWorld, pxPerMm, BASE_SCALE };
+  return { init, resize, draw, drawLandingSequence, project, screenToWorld, pxPerMm, BASE_SCALE };
 })();

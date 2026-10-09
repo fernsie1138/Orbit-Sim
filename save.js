@@ -20,7 +20,7 @@ const SaveSystem = (() => {
                                                 // isn't silently lost, not
                                                 // because the old name means
                                                 // anything going forward.
-  const CURRENT_VERSION = 16;
+  const CURRENT_VERSION = 17;
 
   function save(state) {
     state.meta.savedAt = Date.now();
@@ -284,6 +284,19 @@ const SaveSystem = (() => {
         ship.passengersCarried = 0;
       }
       v = 16;
+    }
+
+    if (v < 17) {
+      // Added the interactive landing/launch sequence (state.
+      // landingSequence). Old saves have no such field — default to
+      // null (flying normally), which is always safe regardless of
+      // where an existing save left off; a save genuinely captured
+      // mid-sequence would also just resume cleanly with it present,
+      // but this covers saves from before the field existed at all.
+      if (typeof state.landingSequence === 'undefined') {
+        state.landingSequence = null;
+      }
+      v = 17;
     }
 
     state.meta.version = CURRENT_VERSION;
