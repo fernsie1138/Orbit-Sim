@@ -353,10 +353,47 @@ const StarMap = (() => {
     // formula instead of two mirrored ones.
     const shipProgress = seq.mode === 'landing' ? (Landing.MAX_ALTITUDE - seq.altitude) : seq.altitude;
 
+    // Roll rotates the WHOLE scene around screen center, as if the
+    // camera itself (the ship) were banking — the world appears to
+    // rotate around a level, fixed reference rather than the reference
+    // itself tilting, which is why the ship's own crosshair (drawn
+    // separately, below) deliberately does NOT get this rotation
+    // applied: it's the one fixed "level" thing to judge the roll
+    // against, the same way a real artificial horizon instrument works.
+    const rollRad = (seq.rollAngle || 0) * Math.PI / 180;
+    const cosR = Math.cos(rollRad), sinR = Math.sin(rollRad);
     function project(worldX, worldY, distAhead) {
       const d = Math.max(1, distAhead);
       const scale = FOCAL / d;
-      return { x: cx + (worldX - seq.lateralX) * scale, y: cy + (worldY - seq.lateralY) * scale, scale };
+      const rawX = (worldX - seq.lateralX) * scale;
+      const rawY = (worldY - seq.lateralY) * scale;
+      return { x: cx + rawX * cosR - rawY * sinR, y: cy + rawX * sinR + rawY * cosR, scale };
+    }
+
+    // Faint background reference grid — lies FLAT in the same
+    // camera-facing plane as the landing pad, at the pad's own distance
+    // (targetDist), rather than at a separate fixed depth. Using the
+    // exact same depth and the same project() calls as the pad means it
+    // grows and shrinks in perfect lockstep with it through the whole
+    // approach — "scales correctly with the landing pad" by construction,
+    // not by separately tuning two things to roughly match. Drawn first
+    // so the gates and pad render over it, staying visually subordinate
+    // (faint, no glow) rather than competing with them.
+    const gridTargetDist = Landing.MAX_ALTITUDE - shipProgress;
+    if (gridTargetDist >= 0) {
+      const padOuterHalfForGrid = Landing.LANDING_ZONE_RADIUS;
+      const gridSpacing = padOuterHalfForGrid * 0.5;
+      const gridExtent = padOuterHalfForGrid * 3;
+      const gridLines = Math.round(gridExtent / gridSpacing);
+      ctx.strokeStyle = 'rgba(51,255,51,0.18)';
+      ctx.lineWidth = 1;
+      for (let i = -gridLines; i <= gridLines; i++) {
+        const off = i * gridSpacing;
+        let p1 = project(off, -gridExtent, gridTargetDist), p2 = project(off, gridExtent, gridTargetDist);
+        ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+        p1 = project(-gridExtent, off, gridTargetDist); p2 = project(gridExtent, off, gridTargetDist);
+        ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+      }
     }
 
     // Gates: purely visual waypoints giving a sense of speed/depth —

@@ -36,6 +36,23 @@ const Landing = (() => {
   const WIND_RETARGET_MIN = 3, WIND_RETARGET_MAX = 6; // seconds between the wind picking a new direction to drift toward
   const WIND_EASE_RATE = 0.4;         // how quickly actual wind eases toward its current target each second
 
+  // Roll: the ship can start rotating about its own forward axis during
+  // descent — an ambient torque (rollWind, same slowly-retargeting-and-
+  // easing shape as the lateral wind above, just a single scalar
+  // instead of a 2D vector) nudges roll RATE around, and it's on the
+  // player to counter it with the roll thrusters. Only the RATE at
+  // touchdown is scored (not the cumulative angle) — "rolling at too
+  // high a rate" is what causes damage, not merely having drifted off
+  // level, matching how descent rate (not altitude) is what's scored
+  // for a hard landing.
+  const SAFE_ROLL_RATE = 40;          // deg/sec at or under this at touchdown: no roll damage
+  const ROLL_DAMAGE_PER_EXCESS = 0.6; // hull damage per deg/sec of roll rate OVER the safe threshold, at touchdown
+  const ROLL_THRUST_ACCEL = 70;       // roll thruster buttons' effect on roll rate (deg/sec^2) when held
+  const ROLL_DAMPING = 0.25;          // natural bleed-off of roll rate per second (per unit) — same shape as LATERAL_DAMPING, keeps it correctable rather than purely chaotic
+  const ROLL_WIND_MAX = 25;           // max magnitude of the ambient roll-rate-nudging torque, deg/sec^2
+  const ROLL_WIND_RETARGET_MIN = 4, ROLL_WIND_RETARGET_MAX = 8;
+  const ROLL_WIND_EASE_RATE = 0.3;
+
   // Gates are purely visual waypoints (a sense of speed/depth passing by,
   // like the reference film sequence this was modeled on) — they are
   // NOT individual pass/fail checkpoints. Only the final touchdown
@@ -94,6 +111,9 @@ const Landing = (() => {
       windX: 0, windY: 0,
       windTargetX: windTarget.x, windTargetY: windTarget.y,
       windRetargetIn: randomRetargetDelay(),
+      rollAngle: 0,           // degrees, cumulative — purely visual (rotates the rendered scene), not itself scored
+      rollRate: 0,            // degrees/sec — THIS is what's scored at touchdown
+      rollWind: 0, rollWindTarget: randomRollWindTarget(), rollWindRetargetIn: randomRollRetargetDelay(),
       outcome: null,         // filled in by finishSequence once altitude crosses the far end
     };
   }
@@ -106,11 +126,18 @@ const Landing = (() => {
   function randomRetargetDelay() {
     return WIND_RETARGET_MIN + Math.random() * (WIND_RETARGET_MAX - WIND_RETARGET_MIN);
   }
+  function randomRollWindTarget() {
+    return (Math.random() * 2 - 1) * ROLL_WIND_MAX;
+  }
+  function randomRollRetargetDelay() {
+    return ROLL_WIND_RETARGET_MIN + Math.random() * (ROLL_WIND_RETARGET_MAX - ROLL_WIND_RETARGET_MIN);
+  }
 
-  // controls: { up, down, left, right, thrust }. The four directional
-  // fields are booleans, "held this frame," and affect lateral drift.
-  // thrust is a THROTTLE FRACTION from 0 (off) to 1 (full), not a
-  // boolean — a sliding throttle for landing, though launch's
+  // controls: { up, down, left, right, rollLeft, rollRight, thrust }.
+  // up/down/left/right/rollLeft/rollRight are booleans, "held this
+  // frame" — the first four affect lateral drift, the roll pair affect
+  // roll rate. thrust is a THROTTLE FRACTION from 0 (off) to 1 (full),
+  // not a boolean — a sliding throttle for landing, though launch's
   // tap-to-toggle control still just drives it to a plain 0 or 1. It
   // always means the same thing in both modes: "fight gravity, slow the
   // fall / speed the climb," scaled by how far open the throttle is.
@@ -143,6 +170,24 @@ const Landing = (() => {
     seq.lateralVY *= Math.max(0, 1 - LATERAL_DAMPING * dt);
     seq.lateralX += seq.lateralVX * dt;
     seq.lateralY += seq.lateralVY * dt;
+
+    // Roll: same shape as the lateral wind above — an ambient torque
+    // that slowly retargets and eases, nudging roll rate around, which
+    // the player counters with the roll thruster buttons. Damped the
+    // same way lateral velocity is, so it stays correctable rather than
+    // spiraling unrecoverably if left alone briefly.
+    seq.rollWindRetargetIn -= dt;
+    if (seq.rollWindRetargetIn <= 0) {
+      seq.rollWindTarget = randomRollWindTarget();
+      seq.rollWindRetargetIn = randomRollRetargetDelay();
+    }
+    seq.rollWind += (seq.rollWindTarget - seq.rollWind) * Math.min(1, ROLL_WIND_EASE_RATE * dt);
+    let rollAccel = seq.rollWind;
+    if (controls.rollLeft) rollAccel -= ROLL_THRUST_ACCEL;
+    if (controls.rollRight) rollAccel += ROLL_THRUST_ACCEL;
+    seq.rollRate += rollAccel * dt;
+    seq.rollRate *= Math.max(0, 1 - ROLL_DAMPING * dt);
+    seq.rollAngle += seq.rollRate * dt;
 
     // Descent rate: gravity always pulls it up (toward the ground);
     // thrust always fights that, regardless of mode. A loaded ship
@@ -212,12 +257,23 @@ const Landing = (() => {
       severity = 'clean';
     }
 
-    seq.outcome = { missDistance, missedZone, descentRate: rate, severity };
+    // Roll damage: continuous past the safe threshold rather than a
+    // discrete clean/hard/catastrophic tier (unlike descent rate) —
+    // "too high a roll rate causes damage" is the whole brief, scaled
+    // smoothly by how far over the line it was, the same treatment
+    // already used for a missed landing zone. Scored for BOTH modes —
+    // unlike descent speed, an excessive roll rate is just as much a
+    // structural problem tearing away from the ground as slamming into
+    // it, so there's no mode-specific exemption here.
+    const rollRateExcess = Math.max(0, Math.abs(seq.rollRate) - SAFE_ROLL_RATE);
+    const rollDamage = Math.round(rollRateExcess * ROLL_DAMAGE_PER_EXCESS);
+
+    seq.outcome = { missDistance, missedZone, descentRate: rate, severity, rollRate: seq.rollRate, rollDamage };
   }
 
   return {
     MAX_ALTITUDE, LANDING_ZONE_RADIUS, SAFE_DESCENT_RATE, HARD_LANDING_RATE,
-    GATE_COUNT, GATE_SIZE, CARGO_MASS_PENALTY,
+    GATE_COUNT, GATE_SIZE, CARGO_MASS_PENALTY, SAFE_ROLL_RATE, ROLL_DAMAGE_PER_EXCESS,
     getGateDistances, createSequence, stepSequence,
   };
 })();

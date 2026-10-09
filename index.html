@@ -190,6 +190,15 @@
     touch-action: manipulation;
   }
   #landing-throttle-caption { font-size: 9px; color: var(--green-dim); letter-spacing: 1px; }
+  #landing-roll-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin-top: 10px;
+  }
+  #landing-roll-row .btn { padding: 10px 16px; font-size: 18px; }
+  #landing-roll-caption { font-size: 9px; color: var(--green-dim); letter-spacing: 1px; min-width: 32px; text-align: center; }
   #control-panel .panel-label {
     font-size: 9px;
     letter-spacing: 2px;
@@ -468,7 +477,7 @@
       <button class="btn small" id="test-btn">🧪 TEST</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 21</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 22</div>
     </div>
 
     <div id="left-controls">
@@ -508,6 +517,7 @@
       <div id="landing-rate-status">—</div>
       <div id="landing-offset">DRIFT: —</div>
       <div id="landing-fuel">FUEL: —</div>
+      <div id="landing-roll">ROLL: —</div>
     </div>
 
     <div id="landing-controls">
@@ -531,6 +541,11 @@
           <input type="range" id="landing-throttle-slider" min="0" max="100" value="0" step="1" aria-label="Descent throttle">
           <div id="landing-throttle-caption">THROTTLE</div>
         </div>
+      </div>
+      <div id="landing-roll-row">
+        <button class="btn" id="btn-land-roll-left" title="Roll Left">↺</button>
+        <div id="landing-roll-caption">ROLL</div>
+        <button class="btn" id="btn-land-roll-right" title="Roll Right">↻</button>
       </div>
     </div>
 
@@ -781,10 +796,11 @@ function forceReleaseHeldControls() {
   // fire this handler and incorrectly reset the thrust toggle back to
   // off mid-ascent, even though nothing about the player's actual
   // thrust input had changed.
-  ['up', 'down', 'left', 'right'].forEach(key => {
+  [['up', 'btn-land-up'], ['down', 'btn-land-down'], ['left', 'btn-land-left'], ['right', 'btn-land-right'],
+   ['rollLeft', 'btn-land-roll-left'], ['rollRight', 'btn-land-roll-right']].forEach(([key, id]) => {
     if (heldLandingControls[key]) {
       heldLandingControls[key] = false;
-      const el = document.getElementById('btn-land-' + key);
+      const el = document.getElementById(id);
       if (el) el.classList.remove('active');
     }
   });
@@ -826,7 +842,7 @@ bindHold(btnBurn,
 // Both write the SAME underlying heldLandingControls.thrust (a 0-1
 // fraction, not a boolean — see landing.js), so Landing.stepSequence
 // never needs to know or care which UI produced the value.
-const heldLandingControls = { up: false, down: false, left: false, right: false, thrust: 0 };
+const heldLandingControls = { up: false, down: false, left: false, right: false, rollLeft: false, rollRight: false, thrust: 0 };
 // 10% of the normal space-flight burn rate — thrusting during descent
 // is a much smaller maneuver than a full burn in open space, and
 // draws from the very same tank (see the main loop, where this is
@@ -842,6 +858,8 @@ bindLandingHold('btn-land-up', 'up');
 bindLandingHold('btn-land-down', 'down');
 bindLandingHold('btn-land-left', 'left');
 bindLandingHold('btn-land-right', 'right');
+bindLandingHold('btn-land-roll-left', 'rollLeft');
+bindLandingHold('btn-land-roll-right', 'rollRight');
 
 const btnLandThrust = document.getElementById('btn-land-thrust');
 btnLandThrust.addEventListener('click', () => {
@@ -1055,6 +1073,18 @@ function updateLandingSequenceHud() {
   fuelEl.style.color = fuelColor;
   fuelEl.style.textShadow = fuelPct < 40 ? `0 0 6px ${fuelColor}` : '';
 
+  // Roll rate, colored against the exact same threshold it's actually
+  // scored against at touchdown (Landing.SAFE_ROLL_RATE) — same
+  // "tell the truth about what happens right now" reasoning as the
+  // descent-rate indicator below.
+  const rollEl = document.getElementById('landing-roll');
+  const rollRate = seq.rollRate || 0;
+  rollEl.textContent = `ROLL: ${rollRate.toFixed(0)}°/s`;
+  const rollSafe = Math.abs(rollRate) <= Landing.SAFE_ROLL_RATE;
+  const rollColor = rollSafe ? 'var(--green)' : 'var(--amber)';
+  rollEl.style.color = rollColor;
+  rollEl.style.textShadow = rollSafe ? '' : `0 0 6px ${rollColor}`;
+
   const statusEl = document.getElementById('landing-rate-status');
   const status = getDescentSafetyStatus(seq);
   if (status) {
@@ -1101,6 +1131,11 @@ function applyLandingOutcome(seq) {
     messages.push(`MISSED ZONE — FEE ${formatCredits(fee)} CR, HULL -${hullDamage}`);
   }
 
+  if (outcome.rollDamage > 0) {
+    ship.hull = Math.max(1, ship.hull - outcome.rollDamage);
+    messages.push(`EXCESSIVE ROLL (${Math.abs(Math.round(outcome.rollRate))}°/s) — HULL -${outcome.rollDamage}`);
+  }
+
   return messages;
 }
 
@@ -1132,6 +1167,14 @@ function finishLandingSequence() {
     // this out and jumped straight to an entirely different view, which
     // is jarring if the ship had any residual drift at touchdown; now
     // there's simply nothing to jump to or reset.
+    //
+    // Roll angle/rate ARE reset here, though — unlike lateral position,
+    // a parked ship visually settling level on the pad (rather than
+    // sitting shown at whatever tilt it happened to touch down at,
+    // indefinitely, while just sitting still) is the sensible resting
+    // state, and roll rate no longer means anything once stationary.
+    gameState.landingSequence.rollAngle = 0;
+    gameState.landingSequence.rollRate = 0;
   } else {
     Physics.launch(gameState);
     setFlightControlsEnabled(true);
