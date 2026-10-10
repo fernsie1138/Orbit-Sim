@@ -20,7 +20,7 @@ const SaveSystem = (() => {
                                                 // isn't silently lost, not
                                                 // because the old name means
                                                 // anything going forward.
-  const CURRENT_VERSION = 17;
+  const CURRENT_VERSION = 18;
 
   function save(state) {
     state.meta.savedAt = Date.now();
@@ -297,6 +297,19 @@ const SaveSystem = (() => {
         state.landingSequence = null;
       }
       v = 17;
+    }
+
+    if (v < 18) {
+      // Added per-location landing (state.player.landedLocationId) — a
+      // specific Codex location within the body the ship is landed at,
+      // chosen via the new planet map. Old saves have no such field;
+      // default to null, which is always valid (it just means "no
+      // specific location recorded," true for every pre-existing
+      // landed save, since this concept didn't exist before).
+      if (typeof state.player.landedLocationId === 'undefined') {
+        state.player.landedLocationId = null;
+      }
+      v = 18;
     }
 
     state.meta.version = CURRENT_VERSION;

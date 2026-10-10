@@ -264,6 +264,25 @@
   }
   .panel .row { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
   .panel-close { margin-top: 14px; display: flex; justify-content: flex-end; }
+  #planet-map-body { display: flex; justify-content: center; align-items: center; }
+  #planet-map-svg { width: min(72vw, 420px); height: min(72vw, 420px); overflow: visible; }
+  .planet-map-circle { fill: none; stroke: var(--green); stroke-width: 2; }
+  .planet-map-terminator { stroke: var(--green-dim); stroke-width: 1.5; }
+  .planet-map-pin-line { stroke: var(--green); stroke-width: 1; opacity: 0.7; }
+  .planet-map-pin-dot {
+    fill: #001400; stroke: var(--green); stroke-width: 2; cursor: pointer;
+  }
+  .planet-map-pin-dot.orbital { stroke: var(--amber); }
+  .planet-map-pin-dot:hover, .planet-map-pin-dot:active { fill: rgba(51,255,51,0.25); }
+  .planet-map-pin-label {
+    fill: var(--green); font-family: inherit; font-size: 13px; letter-spacing: 0.5px;
+    cursor: pointer; text-transform: uppercase; -webkit-user-select: none; user-select: none;
+  }
+  .planet-map-pin-label.orbital { fill: var(--amber); }
+  .planet-map-pin-type {
+    fill: var(--green-dim); font-family: inherit; font-size: 9px; letter-spacing: 1px;
+    text-transform: uppercase; -webkit-user-select: none; user-select: none;
+  }
 
   /* ---------- Codex ---------- */
   .codex-panel {
@@ -477,7 +496,7 @@
       <button class="btn small" id="test-btn">🧪 TEST</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 22</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 24</div>
     </div>
 
     <div id="left-controls">
@@ -645,6 +664,20 @@
         <div id="repair-credits" style="margin-bottom:10px;font-size:13px;color:var(--green-bright);">CREDITS: 10,000</div>
         <div id="repair-body"></div>
         <div class="panel-close"><button class="btn" id="btn-back-repair">← LANDING SERVICES</button></div>
+      </div>
+    </div>
+
+    <!-- Planet map: shown when pressing LAND (not landed yet) instead of
+         jumping straight into the descent sequence — a circle for the
+         body with each of its Codex locations plotted around it (ground
+         locations on the circle's edge, orbital ones floating outside
+         it), each clickable to actually begin landing there. See
+         openPlanetMap/renderPlanetMap and the LAND button handler. -->
+    <div class="overlay" id="planet-map-overlay">
+      <div class="panel codex-panel">
+        <h2 id="planet-map-title">—</h2>
+        <div id="planet-map-body"></div>
+        <div class="panel-close"><button class="btn" id="btn-close-planet-map">✕ CANCEL</button></div>
       </div>
     </div>
 
@@ -959,6 +992,105 @@ function updateLandLaunchControl() {
   document.getElementById('btn-landing-services').disabled = gameState.player.location !== 'landed';
 }
 
+// ---- Planet map: shown when pressing LAND (not yet landed) instead of
+// jumping straight into the descent sequence — a circle for the body
+// with each of its Codex locations plotted around it (ground locations
+// on the circle's edge, orbital ones floating outside it, matching how
+// they're tagged in codex.js), each clickable to actually begin landing
+// there. Built as inline SVG generated into a plain HTML container,
+// same innerHTML-templating approach used by every other overlay body
+// in this game (missions-body, codex-body, etc.) — just emitting SVG
+// tags instead of divs, which parses and renders exactly the same way.
+const PLANET_MAP_CX = 200, PLANET_MAP_CY = 200, PLANET_MAP_RADIUS = 110;
+
+function openPlanetMap(body) {
+  document.getElementById('planet-map-title').textContent = body.name.toUpperCase();
+  document.getElementById('planet-map-overlay').dataset.bodyId = body.id; // lets anything (tests included) know which body's map is currently open
+  renderPlanetMap(body);
+  document.getElementById('planet-map-overlay').classList.add('visible');
+}
+
+function closePlanetMap() {
+  document.getElementById('planet-map-overlay').classList.remove('visible');
+}
+
+function renderPlanetMap(body) {
+  const locations = Codex.getLocations(body.id);
+  const ground = locations.filter(l => !l.orbital);
+  const orbital = locations.filter(l => l.orbital);
+  const cx = PLANET_MAP_CX, cy = PLANET_MAP_CY, r = PLANET_MAP_RADIUS;
+
+  let svg = `<svg id="planet-map-svg" viewBox="0 0 400 400">`;
+  svg += `<circle class="planet-map-circle" cx="${cx}" cy="${cy}" r="${r}" />`;
+  svg += `<line class="planet-map-terminator" x1="${(cx - r * 0.95).toFixed(1)}" y1="${(cy - r * 0.25).toFixed(1)}" x2="${(cx + r * 0.95).toFixed(1)}" y2="${(cy + r * 0.35).toFixed(1)}" />`;
+
+  // Ground locations: spread evenly around the full circle, starting
+  // from the top. Each pin sits ON the circle's edge; its label extends
+  // further out along the same angle, anchored so the text never grows
+  // back across the circle regardless of which side it's on.
+  ground.forEach((loc, i) => {
+    const angle = (-90 + (360 / ground.length) * i) * Math.PI / 180;
+    const px = cx + r * Math.cos(angle), py = cy + r * Math.sin(angle);
+    const labelR = r + 36;
+    const lx = cx + labelR * Math.cos(angle), ly = cy + labelR * Math.sin(angle);
+    const anchor = Math.cos(angle) >= -0.001 ? 'start' : 'end';
+    const textX = lx + (anchor === 'start' ? 10 : -10);
+    svg += `<line class="planet-map-pin-line" x1="${px.toFixed(1)}" y1="${py.toFixed(1)}" x2="${lx.toFixed(1)}" y2="${ly.toFixed(1)}" />`;
+    svg += `<circle class="planet-map-pin-dot" id="planet-map-pin-${loc.id}" cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="7" />`;
+    svg += `<text class="planet-map-pin-label" id="planet-map-label-${loc.id}" x="${textX.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}" dominant-baseline="middle">${loc.name}</text>`;
+    svg += `<text class="planet-map-pin-type" x="${textX.toFixed(1)}" y="${(ly + 14).toFixed(1)}" text-anchor="${anchor}">${loc.type}</text>`;
+  });
+
+  // Orbital locations: a small cluster floating outside the circle
+  // (upper right), clearly separated from the ground pins rather than
+  // sharing their ring — these aren't on the surface at all.
+  orbital.forEach((loc, i) => {
+    const baseAngle = -45;
+    const spread = 18;
+    const angle = (baseAngle + (i - (orbital.length - 1) / 2) * spread) * Math.PI / 180;
+    const orbR = r * 1.55;
+    const px = cx + orbR * Math.cos(angle), py = cy + orbR * Math.sin(angle);
+    const textX = px + 14;
+    svg += `<circle class="planet-map-pin-dot orbital" id="planet-map-pin-${loc.id}" cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="7" />`;
+    svg += `<text class="planet-map-pin-label orbital" id="planet-map-label-${loc.id}" x="${textX.toFixed(1)}" y="${py.toFixed(1)}" text-anchor="start" dominant-baseline="middle">${loc.name}</text>`;
+    svg += `<text class="planet-map-pin-type" x="${textX.toFixed(1)}" y="${(py + 14).toFixed(1)}" text-anchor="start">${loc.type}</text>`;
+  });
+
+  svg += `</svg>`;
+  document.getElementById('planet-map-body').innerHTML = svg;
+
+  // Both the dot and its label are clickable — bound by predictable
+  // per-location ids rather than a shared attribute-selector query, so
+  // this doesn't depend on querySelectorAll supporting SVG content.
+  locations.forEach(loc => {
+    [`planet-map-pin-${loc.id}`, `planet-map-label-${loc.id}`].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('click', () => beginLandingAtLocation(body, loc));
+    });
+  });
+}
+
+document.getElementById('btn-close-planet-map').addEventListener('click', closePlanetMap);
+
+// Starts the actual interactive descent sequence at a SPECIFIC chosen
+// location — pulled out of the LAND button handler so both the planet
+// map's location clicks and (if ever needed) any other entry point can
+// reach it the same way.
+// `location` is optional — null/omitted for a body with no Codex
+// locations at all (stations: codex.js is deliberately scoped to
+// planets/moons only, so this is the only case it happens for), landing
+// generically at the body as a whole exactly as it always did before
+// this feature existed, rather than requiring a specific pick.
+function beginLandingAtLocation(body, location) {
+  closePlanetMap();
+  const ship = gameState.player.ship;
+  const cargoFraction = ship.cargoCapacity > 0 ? ship.cargoUsed / ship.cargoCapacity : 0;
+  const massMultiplier = 1 + cargoFraction * Landing.CARGO_MASS_PENALTY;
+  gameState.landingSequence = Landing.createSequence('landing', body.id, massMultiplier);
+  if (location) gameState.landingSequence.locationId = location.id; // remembered through to finishLandingSequence/landedLocationId
+  enterLandingSequenceUI();
+}
+
 // ---- Landing: pressing LAND starts the interactive descent sequence
 // (see landing.js) instead of instantly teleporting the ship — the
 // actual Physics.land() call, and all its consequences, happen once the
@@ -981,21 +1113,25 @@ btnLandLaunch.addEventListener('click', () => {
     Physics.launch(gameState);
     setFlightControlsEnabled(true);
     gameState.landingSequence = null; // back in open space — nothing to stay parked on, return to the normal top-down map
+    gameState.player.landedLocationId = null;
     showToast(`LAUNCHED — IN ORBIT AROUND ${name}`);
     updateLandLaunchControl();
   } else {
     const landableId = btnLandLaunch.dataset.landableId;
     const body = landableId ? Physics.findBody(system, landableId) : null;
     if (!body) return; // button should be disabled in this case, but don't act on stale data
-    // A full cargo hold makes the ship effectively heavier for the
-    // descent — more pull from gravity, less deceleration per unit of
-    // thrust (see landing.js) — computed once here, at the moment the
-    // sequence starts, since cargo can't change mid-descent.
-    const ship = gameState.player.ship;
-    const cargoFraction = ship.cargoCapacity > 0 ? ship.cargoUsed / ship.cargoCapacity : 0;
-    const massMultiplier = 1 + cargoFraction * Landing.CARGO_MASS_PENALTY;
-    gameState.landingSequence = Landing.createSequence('landing', body.id, massMultiplier);
-    enterLandingSequenceUI();
+    // The actual descent sequence (and the cargo-mass calculation that
+    // used to happen right here) now only starts once the player picks
+    // a specific location on the planet map — see beginLandingAtLocation.
+    // Bodies with no Codex locations at all (stations — see codex.js's
+    // own scope comment) have nothing for the map to show, so they skip
+    // straight to the sequence exactly as every body used to, rather
+    // than opening an empty, unusable popup.
+    if (Codex.getLocations(body.id).length > 0) {
+      openPlanetMap(body);
+    } else {
+      beginLandingAtLocation(body, null);
+    }
   }
 });
 
@@ -1149,13 +1285,16 @@ function finishLandingSequence() {
   if (seq.mode === 'landing') {
     Physics.land(gameState, body);
     setFlightControlsEnabled(false);
+    gameState.player.landedLocationId = seq.locationId || null;
+    const location = seq.locationId ? Codex.getLocation(body.id, seq.locationId) : null;
+    const landedAtLabel = location ? `${location.name.toUpperCase()}, ${bodyName}` : bodyName;
     const missionResult = checkMissionCompletionOnLanding(body.id);
     if (missionResult.completedCount > 0) {
       const plural = missionResult.completedCount > 1 ? 'S' : '';
       outcomeMessages.push(`${missionResult.completedCount} JOB${plural} COMPLETE (+${formatCredits(missionResult.totalPayment)} CR)`);
     }
     const summary = outcomeMessages.length ? outcomeMessages.join(' — ') : 'CLEAN TOUCHDOWN';
-    showToast(`LANDED AT ${bodyName} — ${summary}`);
+    showToast(`LANDED AT ${landedAtLabel} — ${summary}`);
     // Deliberately NOT clearing gameState.landingSequence here — it's
     // left frozen (active:false, altitude 0, whatever lateral drift the
     // ship had at the exact moment of touchdown) so the main loop keeps
@@ -1181,6 +1320,7 @@ function finishLandingSequence() {
     const summary = outcomeMessages.length ? outcomeMessages.join(' — ') : 'CLEAN DEPARTURE';
     showToast(`LAUNCHED FROM ${bodyName} — ${summary}`);
     gameState.landingSequence = null; // back in open space — nothing to stay parked on
+    gameState.player.landedLocationId = null;
   }
 
   exitLandingSequenceUI(); // restores the NORMAL flight HUD/control-panel either way — see the main loop for which canvas view accompanies them
@@ -1336,6 +1476,11 @@ function renderCodexEntryHtml(body, entry, opts) {
   html += field('Population', entry.population);
   html += field('Government', entry.government);
   html += field('History', entry.history);
+  if (entry.locations && entry.locations.length) {
+    html += field('Locations', entry.locations.map(loc =>
+      `<div class="codex-personality"><span class="name">${loc.name}</span> — <span class="role">${loc.type.toUpperCase()}${loc.orbital ? ' · ORBITAL' : ''}</span><br>${loc.description}</div>`
+    ).join(''));
+  }
   html += field('Current News', list(entry.news));
   html += field('Legal Trade', list(entry.commoditiesLegal));
   html += field('Illegal Trade', list(entry.commoditiesIllegal));
@@ -1821,6 +1966,11 @@ function updateMissionStatusHud() {
   }
   const system = getCurrentSystem(gameState);
   const destinations = active.map(m => {
+    // Prefer the mission's own specific destination location name (e.g.
+    // "KESSLER GALLERY") over the bare body name — falls back to the
+    // body name for missions from an older save that predate per-
+    // mission locations, so an in-progress job never shows "undefined."
+    if (m.destinationLocationName) return m.destinationLocationName.toUpperCase();
     const dest = Physics.findBody(system, m.destinationId);
     return dest ? dest.name.toUpperCase() : '?';
   });

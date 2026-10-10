@@ -86,6 +86,10 @@ const Missions = (() => {
     return 5;
   }
 
+  // originName/destName are "Location Name (Body Name)" — the location
+  // alone usually doesn't say which planet it's on, so the body name
+  // stays attached rather than assuming the player remembers every
+  // location's home world.
   function describeMission(type, cargoLabel, originName, destName) {
     if (type === 'data') return `Deliver ${cargoLabel} from ${originName} to ${destName}.`;
     return `Transport ${cargoLabel} from ${originName} to ${destName}.`;
@@ -157,6 +161,21 @@ const Missions = (() => {
       }
       payment = Math.round(payment * variance);
 
+      // A specific named location at each end (Codex.randomLocation),
+      // purely for flavor/display — e.g. "from Kessler Gallery" reads
+      // far more specifically than "from Aldrin" — not a requirement to
+      // land at that exact spot to complete the job; completion still
+      // keys off the destination BODY (see checkMissionCompletionOnLanding
+      // in index.html), matching how landing itself doesn't yet require
+      // picking a specific location either. Falls back to the bare body
+      // name if a body somehow has no codex locations (shouldn't happen
+      // for any of the 12 planets/moons, but keeps this from breaking on
+      // a body added later without any defined yet).
+      const originLocation = Codex.randomLocation(originId);
+      const destLocation = Codex.randomLocation(destBody.id);
+      const originLabel = originLocation ? `${originLocation.name} (${originBody.name})` : originBody.name;
+      const destLabel = destLocation ? `${destLocation.name} (${destBody.name})` : destBody.name;
+
       missions.push({
         id: `m${nextId++}`,
         type,
@@ -166,8 +185,12 @@ const Missions = (() => {
         accommodationClass: details.accommodationClass, // passenger jobs only
         originId,
         destinationId: destBody.id,
+        originLocationId: originLocation ? originLocation.id : null,
+        destinationLocationId: destLocation ? destLocation.id : null,
+        originLocationName: originLocation ? originLocation.name : originBody.name,
+        destinationLocationName: destLocation ? destLocation.name : destBody.name,
         payment,
-        description: describeMission(type, details.label, originBody.name, destBody.name),
+        description: describeMission(type, details.label, originLabel, destLabel),
       });
     }
     return { missions, nextId };

@@ -37,6 +37,12 @@ const CODEX_DATA = {
       { name: 'Director Osei Vantry', role: 'Authority Site Director', blurb: 'Third-generation administrator who inherited the post from her father. Popular with shareholders, considerably less so on the gallery floor.' },
       { name: 'Teodor Hask', role: 'Assembly Shop Steward', blurb: 'Unofficial voice of the miners\' assembly. Has been "about to be fired" for a decade and somehow never is — which tells you something about how useful he is to keep around, happy or not.' },
     ],
+    locations: [
+      { id: 'aldrin-loc-kessler-gallery', name: 'Kessler Gallery', type: 'mining', orbital: false, description: 'A kilometers-deep gallery cut into the Kessler Rift, worked around the clock by rotating extraction crews chasing the vein confirmed richer than projected. The air inside tastes faintly of scorched rock no amount of scrubbing ever quite clears.' },
+      { id: 'aldrin-loc-hearthline', name: 'Hearthline', type: 'city', orbital: false, description: "The Authority's primary settlement, built into the canyon wall behind triple-sealed pressure doors. Multi-generational families live stacked in converted gallery housing, and the central concourse is as close as Aldrin gets to a town square." },
+      { id: 'aldrin-loc-vantry-point', name: 'Vantry Point Spaceport', type: 'spaceport', orbital: false, description: "Aldrin's only certified landing field, named for the Director's grandfather. Every gram of refined ore that leaves the planet passes through its cargo bays first, under the Authority's watchful inventory." },
+      { id: 'aldrin-loc-authority-hall', name: 'Authority Hall', type: 'government', orbital: false, description: "The Extraction Authority's administrative seat, where Director Vantry's office and the company's entire bureaucratic apparatus occupy floors cut directly into solid rock. The miners' assembly's petitions go here to be, politely, declined." },
+    ],
   },
   'aldrin-moon1': {
     type: 'Processing Moon (Industrial)',
@@ -54,6 +60,10 @@ const CODEX_DATA = {
     personalities: [
       { name: 'Foreman Culley Arnab', role: 'Shift Foreman', blurb: 'Runs the maintenance rotations and is, by most accounts, the only person who actually understands the gantry scheduling software anymore.' },
     ],
+    locations: [
+      { id: 'aldrin-moon1-loc-gantry-complex', name: 'Gantry Processing Complex', type: 'industrial', orbital: false, description: "The moon's central smelting operation, a sprawl of refinery stacks and slag terraces fed by ore canisters fired up from Aldrin's surface. It runs itself, mostly — the maintenance crews are here to keep it that way." },
+      { id: 'aldrin-moon1-loc-catch-platform-7', name: 'Catch Platform Seven', type: 'outpost', orbital: false, description: 'One of several ore-canister catch platforms strung along the rail gantry line, staffed by a skeleton crew whose entire job is making sure nothing arriving at high velocity misses its mark.' },
+    ],
   },
   'aldrin-moon2': {
     type: 'Independent Claims Moon',
@@ -70,6 +80,10 @@ const CODEX_DATA = {
     commoditiesIllegal: ['Ore laundered through here to obscure its Aldrin-Authority origin', 'Unlicensed excavation charges'],
     personalities: [
       { name: '"Bones" Okonkwo-Reyes', role: 'Senior Claimholder', blurb: 'Oldest prospector still digging on the moon, and by informal consensus the final word when the claimholders\' panel deadlocks.' },
+    ],
+    locations: [
+      { id: 'aldrin-moon2-loc-reyes-camp', name: 'Reyes Camp', type: 'mining', orbital: false, description: "One of the moon's oldest independent dig sites, worked by prospectors who bought out their Authority contracts rather than renew them. The claim markers here predate most of the moon's newer arrivals." },
+      { id: 'aldrin-moon2-loc-claim-line', name: 'The Claim Line', type: 'town', orbital: false, description: "A strip of habitat domes and trade stalls that grew up where several claims' boundaries happened to meet, now the closest thing the moon has to a shared settlement — and the usual venue when the claimholders' panel needs to convene." },
     ],
   },
 
@@ -94,6 +108,13 @@ const CODEX_DATA = {
       { name: 'Chancellor Imara Dovetsky', role: 'Head of the Thessaly Accord Council', blurb: 'Two terms in, popular but increasingly dogged by the customs-favoritism inquiry she herself called for.' },
       { name: 'Renn Okafor-Lind', role: 'Investigative Correspondent', blurb: 'Runs the independent feed that broke the customs story. Has a standing reputation for printing things certain council members wish she wouldn\'t.' },
     ],
+    locations: [
+      { id: 'meridian-loc-harborfront', name: 'Harborfront Capital', type: 'city', orbital: false, description: "Meridian's seat of government and largest population center, built along the river delta where the Harborfront Festival returns each season. Council business and festival crowds share the same waterfront streets most of the year." },
+      { id: 'meridian-loc-thessaly-hall', name: 'Thessaly Hall', type: 'government', orbital: false, description: "The Accord Council's chamber and administrative heart, where Chancellor Dovetsky's inquiry into customs favoritism is currently being argued out in committee rooms down every corridor." },
+      { id: 'meridian-loc-central-spaceport', name: 'Meridian Central Spaceport', type: 'spaceport', orbital: false, description: 'The system\'s busiest civilian port by a wide margin, handling everything from agricultural exports to the manufactured goods that make their way to every other world in Thessaly.' },
+      { id: 'meridian-loc-rivermouth', name: 'Rivermouth', type: 'town', orbital: false, description: "A quieter delta town upriver from the capital, mostly agricultural trade and the kind of unhurried pace people from Harborfront complain they don't have time for." },
+      { id: 'meridian-loc-greenbelt-works', name: 'Greenbelt Works', type: 'industrial', orbital: false, description: 'A manufacturing district turning out consumer goods and medical technology for export, dense with fabrication plants that run three shifts to keep pace with system-wide demand.' },
+    ],
   },
   'meridian-moon1': {
     type: 'Orbital Shipyard Moon',
@@ -111,6 +132,10 @@ const CODEX_DATA = {
     personalities: [
       { name: 'Dockmaster Priya Ashwell', role: 'Guild Dockmaster', blurb: 'Has final say over berth scheduling system-wide and is famously immune to bribery — mostly, people suspect, because she enjoys the leverage of being the one thing money can\'t move.' },
     ],
+    locations: [
+      { id: 'meridian-moon1-loc-ashwell-yards', name: 'Ashwell Yards', type: 'industrial', orbital: true, description: "The moon's primary drydock and fabrication complex, where a sizable share of every registered vessel in the system has been built or refitted at least once. Dockmaster Ashwell's berth schedule runs the place with famous precision." },
+      { id: 'meridian-moon1-loc-berthing-ring-4', name: 'Berthing Ring Four', type: 'orbital', orbital: true, description: "One of several orbital habitat rings housing shipyard workers and their families — most residents here have never set foot on the moon's actual surface, and see little reason to start." },
+    ],
   },
   'meridian-moon2': {
     type: 'Agricultural & Research Moon',
@@ -127,6 +152,10 @@ const CODEX_DATA = {
     commoditiesIllegal: ['Patent-infringing bootleg seed stock sold off-manifest'],
     personalities: [
       { name: 'Professor Aldous Rin', role: 'Extension Campus Director', blurb: 'Equal parts agronomist and administrator, and reportedly much happier when he gets to be the former.' },
+    ],
+    locations: [
+      { id: 'meridian-moon2-loc-dome-coop-7', name: 'Dome Cooperative Seven', type: 'industrial', orbital: false, description: "One of dozens of sealed growing domes spread across the moon's barren surface, each a tightly-controlled artificial microclimate turning out the high-yield grain strains feeding Meridian's growing population." },
+      { id: 'meridian-moon2-loc-university-extension', name: 'Thessaly University Extension', type: 'government', orbital: false, description: "The university's off-world research campus, where Professor Rin's faculty study closed-ecosystem efficiency in facilities built right alongside the cooperative's working farms." },
     ],
   },
 
@@ -151,6 +180,12 @@ const CODEX_DATA = {
       { name: 'Harbor-Mother Ysolde Kapoor', role: 'Rotating Guild Council Chair', blurb: 'Currently holds the council\'s rotating chair and has used it to push the contested salvage-tariff proposal harder than most of her predecessors bothered to.' },
       { name: 'Captain Reyo Dunmore', role: 'Independent Salvage Captain', blurb: 'Runs salvage operations that stay just inside (or suspiciously close to the edge of) guild law, depending who you ask.' },
     ],
+    locations: [
+      { id: 'vesper-loc-kapoors-reach', name: "Kapoor's Reach", type: 'city', orbital: false, description: "One of Vesper's largest anchored platform cities, home port to Harbor-Mother Kapoor's own guild and a dense tangle of floating docks, markets, and stacked habitat decks riding out the storm season together." },
+      { id: 'vesper-loc-rotating-hall', name: 'The Rotating Hall', type: 'government', orbital: false, description: 'A platform built to host the guild council whenever its rotating chair calls session — currently occupied by Harbor-Mother Kapoor, who has used the post more aggressively than most who\'ve held it before her.' },
+      { id: 'vesper-loc-dunmores-yard', name: "Dunmore's Salvage Yard", type: 'industrial', orbital: false, description: "A working waterfront yard where Captain Dunmore's crews bring in deep-sea salvage of questionable provenance, processed just fast enough to stay ahead of anyone asking too many questions about where it came from." },
+      { id: 'vesper-loc-tidewater-spaceport', name: 'Tidewater Spaceport', type: 'spaceport', orbital: false, description: "A reinforced floating landing platform built to ride out Vesper's storm season, handling the aquaculture and marine biochemical exports that leave the planet by the shipload." },
+    ],
   },
   'vesper-moon1': {
     type: 'Relay & Weather-Watch Moon',
@@ -166,6 +201,9 @@ const CODEX_DATA = {
     commoditiesIllegal: ['Sold-ahead storm forecasts used for insider shipping advantage'],
     personalities: [
       { name: 'Station Chief Wen Odalis', role: 'Relay Station Chief', blurb: 'Has spent more consecutive years on this moon than anyone else currently alive, and insists she prefers it that way.' },
+    ],
+    locations: [
+      { id: 'vesper-moon1-loc-odalis-relay', name: 'Odalis Relay Station', type: 'orbital', orbital: true, description: "A skeleton-crewed station built almost entirely around its dish arrays and sensor masts, tracking Vesper's storm systems from orbit under Station Chief Odalis, who has outlasted every rotation partner she's ever had." },
     ],
   },
   'vesper-moon2': {
@@ -183,6 +221,10 @@ const CODEX_DATA = {
     commoditiesIllegal: ['Effectively anything — this moon\'s entire economy runs on goods that wouldn\'t clear inspection anywhere else in the system'],
     personalities: [
       { name: '"Ledger" Hale', role: 'Unofficial Port Broker', blurb: 'Nobody elected her anything, but every deal of consequence on the moon seems to pass through her somehow.' },
+    ],
+    locations: [
+      { id: 'vesper-moon2-loc-hales-market', name: "Hale's Market", type: 'town', orbital: false, description: "A sprawling, unplanned tangle of hab-cylinders and trade stalls that grew the way markets grow rather than the way cities are planned — and where most deals of consequence somehow pass through Ledger Hale's hands first." },
+      { id: 'vesper-moon2-loc-open-frames', name: 'The Open Frames', type: 'spaceport', orbital: false, description: "Unlicensed, unregulated docking frames crowded with traders ahead of Vesper's storm season — no guild claims jurisdiction here, and no guild inspector bothers trying." },
     ],
   },
 
@@ -207,6 +249,11 @@ const CODEX_DATA = {
       { name: 'Dr. Senna Voklund', role: 'Lead Research Scientist', blurb: 'Has run the subsurface-ocean survey for over a decade and is notably tight-lipped about what the latest readings actually show.' },
       { name: '"Convoy" Bresh Talon', role: 'Outpost Trader', blurb: 'Widely assumed to broker more than legitimate supply contracts, though nothing has ever been proven — or, more likely, no one with the authority to prove it has ever really tried.' },
     ],
+    locations: [
+      { id: 'kryos-loc-voklund-station', name: 'Voklund Station', type: 'government', orbital: false, description: "The original research station, still the closest thing Kryos has to an official authority. Dr. Voklund's subsurface-ocean survey occupies most of the station, and she is saying remarkably little about its latest readings." },
+      { id: 'kryos-loc-outpost-hearth', name: 'Outpost Hearth', type: 'town', orbital: false, description: "Kryos's main settlement, built around one of the planet's few naturally warm geothermal vents. Domes and buried shelters cluster close to the heat the way settlements elsewhere cluster around water." },
+      { id: 'kryos-loc-talons-dock', name: "Talon's Dock", type: 'spaceport', orbital: false, description: '"Convoy" Bresh Talon\'s supply contracts — and, by persistent rumor, considerably more than that — pass through this cold, lightly-inspected landing field on their way in or out of the system\'s most isolated planet.' },
+    ],
   },
   'kryos-moon1': {
     type: 'Abandoned Claim Moon',
@@ -221,6 +268,9 @@ const CODEX_DATA = {
     commoditiesLegal: ['Nothing traded openly — occasional salvaged scrap metal'],
     commoditiesIllegal: ['A convenient, unwatched waypoint for cargo no one wants scanned'],
     personalities: [],
+    locations: [
+      { id: 'kryos-moon1-loc-collapsed-frames', name: 'The Collapsed Frames', type: 'outpost', orbital: false, description: 'The husk of a mining venture that folded within a few years, its excavation frames collapsed and half-buried in ice creep. Officially abandoned; unofficially, salvage crews pass through often enough to keep a faint trail worn through the frost.' },
+    ],
   },
   'kryos-moon2': {
     type: 'Hidden Outpost Moon',
@@ -237,6 +287,9 @@ const CODEX_DATA = {
     personalities: [
       { name: '(Unconfirmed)', role: 'Alleged Operator', blurb: 'No name is reliably attached to whoever — if anyone — actually runs this place. Every story names someone different.' },
     ],
+    locations: [
+      { id: 'kryos-moon2-loc-crater-floor', name: 'The Crater Floor', type: 'military', orbital: false, description: 'An unremarkable crater that conceals a far more developed, far better-defended installation than its surface suggests. No outpost council inquiry has ever gotten past the perimeter — assuming anyone ever genuinely tried.' },
+    ],
   },
 };
 
@@ -247,6 +300,27 @@ const Codex = (() => {
 
   function hasEntry(bodyId) {
     return !!CODEX_DATA[bodyId];
+  }
+
+  // Every named location at a body (the planet-map popup's pins, each
+  // mission's actual origin/destination) — always an array, even for a
+  // body with no codex entry at all, so callers never need a separate
+  // null-check before iterating.
+  function getLocations(bodyId) {
+    const entry = CODEX_DATA[bodyId];
+    return (entry && entry.locations) || [];
+  }
+
+  function getLocation(bodyId, locationId) {
+    return getLocations(bodyId).find(loc => loc.id === locationId) || null;
+  }
+
+  // A uniformly-random location at a body, or null for a body with none
+  // (shouldn't happen for any of the 12 planets/moons, but a station or
+  // any future body without a codex entry has no locations to offer).
+  function randomLocation(bodyId) {
+    const locs = getLocations(bodyId);
+    return locs.length ? locs[Math.floor(Math.random() * locs.length)] : null;
   }
 
   // Returns every codex-covered body in `system`, grouped by planet in
@@ -266,5 +340,5 @@ const Codex = (() => {
     }));
   }
 
-  return { getEntry, hasEntry, listByPlanet };
+  return { getEntry, hasEntry, getLocations, getLocation, randomLocation, listByPlanet };
 })();

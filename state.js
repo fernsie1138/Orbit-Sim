@@ -317,6 +317,11 @@ function createNewGameState() {
                                  // on, or null while flying — see
                                  // Physics.step's landed-ship handling and
                                  // the Land/Launch controls in index.html.
+      landedLocationId: null,   // which of that body's Codex locations
+                                 // (codex.js) the ship actually landed
+                                 // at, chosen via the planet map; null
+                                 // while flying, and also null for any
+                                 // landing that predates this feature.
       landingOffsetAngle: 0,    // angle (radians) the ship sits at,
                                  // relative to the landed body's OWN
                                  // orbitAngle — kept relative (not
