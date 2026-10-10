@@ -59,7 +59,7 @@ const ECONOMY_MULTIPLIERS = {
 // function (not a bare constant) so a future per-world repair-cost
 // multiplier — matching how fuel/oxygen/supplies already work — could
 // be added later without changing any call site.
-const REPAIR_COST_PER_POINT = 5;
+const REPAIR_COST_PER_POINT = 20; // 4x the original 5 — crashing should have real consequences
 
 const Economy = (() => {
   function getPriceMultipliers(bodyId) {

@@ -266,6 +266,11 @@
   .panel-close { margin-top: 14px; display: flex; justify-content: flex-end; }
   #planet-map-body { display: flex; justify-content: center; align-items: center; }
   #planet-map-svg { width: min(72vw, 420px); height: min(72vw, 420px); overflow: visible; }
+  #planet-map-conditions { margin-top: 14px; text-align: center; }
+  #planet-map-conditions .panel-label { color: var(--green-dim); font-size: 10px; letter-spacing: 2px; margin-bottom: 6px; }
+  #planet-map-conditions-buttons { display: flex; justify-content: center; gap: 8px; }
+  .condition-btn { font-size: 11px; padding: 8px 14px; }
+  .condition-btn.selected { background: rgba(51,255,51,0.25); border-color: var(--green-bright); color: var(--green-bright); }
   .planet-map-circle { fill: none; stroke: var(--green); stroke-width: 2; }
   .planet-map-terminator { stroke: var(--green-dim); stroke-width: 1.5; }
   .planet-map-pin-line { stroke: var(--green); stroke-width: 1; opacity: 0.7; }
@@ -496,7 +501,7 @@
       <button class="btn small" id="test-btn">🧪 TEST</button>
       <div id="hud-clock">T+ 00:00:00</div>
       <div id="hud-warp">RUNNING</div>
-      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 24</div>
+      <div id="hud-build" style="color: var(--green-dim); font-size: 10px; margin-top: 4px;">BUILD 25</div>
     </div>
 
     <div id="left-controls">
@@ -677,6 +682,14 @@
       <div class="panel codex-panel">
         <h2 id="planet-map-title">—</h2>
         <div id="planet-map-body"></div>
+        <div id="planet-map-conditions">
+          <div class="panel-label">LANDING CONDITIONS</div>
+          <div id="planet-map-conditions-buttons">
+            <button class="btn condition-btn" id="btn-condition-calm" data-condition="calm">CALM</button>
+            <button class="btn condition-btn" id="btn-condition-average" data-condition="average">AVERAGE</button>
+            <button class="btn condition-btn" id="btn-condition-difficult" data-condition="difficult">DIFFICULT</button>
+          </div>
+        </div>
         <div class="panel-close"><button class="btn" id="btn-close-planet-map">✕ CANCEL</button></div>
       </div>
     </div>
@@ -1007,12 +1020,36 @@ function openPlanetMap(body) {
   document.getElementById('planet-map-title').textContent = body.name.toUpperCase();
   document.getElementById('planet-map-overlay').dataset.bodyId = body.id; // lets anything (tests included) know which body's map is currently open
   renderPlanetMap(body);
+  updateConditionButtonsUI();
   document.getElementById('planet-map-overlay').classList.add('visible');
 }
 
 function closePlanetMap() {
   document.getElementById('planet-map-overlay').classList.remove('visible');
 }
+
+// Landing Conditions: CALM/AVERAGE/DIFFICULT, picked right on the
+// planet map before committing to a location — scales how much ambient
+// wind/roll turbulence the descent generates (see landing.js's
+// LANDING_CONDITIONS; DIFFICULT is the original, unscaled tuning).
+// Defaults to AVERAGE rather than the original DIFFICULT-equivalent
+// behavior, directly in response to feedback that the sequence was very
+// hard — but persists the player's own choice across landings afterward
+// rather than resetting it back to that default every single time.
+let selectedLandingCondition = 'average';
+function updateConditionButtonsUI() {
+  Object.keys(Landing.LANDING_CONDITIONS).forEach(key => {
+    const btn = document.getElementById('btn-condition-' + key);
+    if (btn) btn.classList.toggle('selected', key === selectedLandingCondition);
+  });
+}
+Object.keys(Landing.LANDING_CONDITIONS || {}).forEach(key => {
+  const btn = document.getElementById('btn-condition-' + key);
+  if (btn) btn.addEventListener('click', () => {
+    selectedLandingCondition = key;
+    updateConditionButtonsUI();
+  });
+});
 
 function renderPlanetMap(body) {
   const locations = Codex.getLocations(body.id);
@@ -1086,7 +1123,12 @@ function beginLandingAtLocation(body, location) {
   const ship = gameState.player.ship;
   const cargoFraction = ship.cargoCapacity > 0 ? ship.cargoUsed / ship.cargoCapacity : 0;
   const massMultiplier = 1 + cargoFraction * Landing.CARGO_MASS_PENALTY;
-  gameState.landingSequence = Landing.createSequence('landing', body.id, massMultiplier);
+  // Uses whatever Landing Condition is currently selected — including
+  // for a station landing, which skips the map (and so never gets a
+  // fresh confirmation of it for that attempt), but still reasonably
+  // benefits from the player's last choice rather than being forced
+  // back to DIFFICULT just because there was no map to pick it on.
+  gameState.landingSequence = Landing.createSequence('landing', body.id, massMultiplier, selectedLandingCondition);
   if (location) gameState.landingSequence.locationId = location.id; // remembered through to finishLandingSequence/landedLocationId
   enterLandingSequenceUI();
 }
@@ -1144,7 +1186,14 @@ function enterLandingSequenceUI() {
   document.getElementById('landing-hud').classList.add('active');
   document.getElementById('landing-controls').classList.add('active');
   const label = seq.mode === 'landing' ? 'DESCENT' : 'ASCENT';
-  document.getElementById('landing-hud-label').textContent = label;
+  // Shows which Landing Condition this particular attempt is actually
+  // running under — chosen on the planet map and otherwise invisible
+  // during the sequence itself, which would leave the player unable to
+  // tell DIFFICULT from CALM except by feel. seq.conditionKey is always
+  // set (createSequence defaults it to 'difficult'), so this never needs
+  // a fallback for a missing entry.
+  const conditionInfo = Landing.LANDING_CONDITIONS[seq.conditionKey];
+  document.getElementById('landing-hud-label').textContent = conditionInfo ? `${label} — ${conditionInfo.label}` : label;
   document.getElementById('landing-controls-label').textContent = label + ' CONTROL';
   // Always start a fresh sequence with thrust off, regardless of
   // whichever interaction model (slider for landing, toggle for
@@ -1966,13 +2015,16 @@ function updateMissionStatusHud() {
   }
   const system = getCurrentSystem(gameState);
   const destinations = active.map(m => {
-    // Prefer the mission's own specific destination location name (e.g.
-    // "KESSLER GALLERY") over the bare body name — falls back to the
-    // body name for missions from an older save that predate per-
-    // mission locations, so an in-progress job never shows "undefined."
-    if (m.destinationLocationName) return m.destinationLocationName.toUpperCase();
+    // Show BOTH the specific destination location and which planet/moon
+    // it's actually on (e.g. "KESSLER GALLERY, ALDRIN") — the location
+    // name alone doesn't say where to fly, which is exactly the
+    // confusion this was reported to cause. Falls back to just the body
+    // name for missions from an older save that predate per-mission
+    // locations, so an in-progress job never shows "undefined."
     const dest = Physics.findBody(system, m.destinationId);
-    return dest ? dest.name.toUpperCase() : '?';
+    const bodyName = dest ? dest.name.toUpperCase() : '?';
+    if (m.destinationLocationName) return `${m.destinationLocationName.toUpperCase()}, ${bodyName}`;
+    return bodyName;
   });
   el.textContent = `JOB STATUS: ${destinations.join(', ')}`;
 }

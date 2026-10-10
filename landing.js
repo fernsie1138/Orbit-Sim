@@ -97,13 +97,35 @@ const Landing = (() => {
   // "cargo unit" is and shouldn't need to. Defaults to 1 (no penalty)
   // if omitted, so existing callers/tests that don't pass it keep
   // behaving exactly as before.
-  function createSequence(mode, bodyId, massMultiplier) {
-    const windTarget = randomWindTarget();
+  // Landing Conditions: how rough the ambient wind/roll turbulence is
+  // for a given attempt, chosen on the planet map before the player
+  // commits to a location (see index.html). DIFFICULT is the original,
+  // unscaled tuning everything above was calibrated against; AVERAGE
+  // and CALM scale the ambient wind's and roll torque's MAGNITUDE down
+  // by 30%/60% respectively — the player's own thrusters (lateral,
+  // roll, main) are never touched by this, only how much ambient
+  // disturbance they're fighting against. intensity multiplies
+  // WIND_MAX and ROLL_WIND_MAX directly; every other constant (damping,
+  // retarget timing, thruster strength) stays identical across all
+  // three so conditions change how MUCH there is to correct, not the
+  // feel of correcting it.
+  const LANDING_CONDITIONS = {
+    difficult: { label: 'DIFFICULT', intensity: 1.0 },
+    average:   { label: 'AVERAGE',   intensity: 0.7 },
+    calm:      { label: 'CALM',      intensity: 0.4 },
+  };
+
+  function createSequence(mode, bodyId, massMultiplier, conditionKey) {
+    const resolvedConditionKey = LANDING_CONDITIONS[conditionKey] ? conditionKey : 'difficult';
+    const windIntensity = LANDING_CONDITIONS[resolvedConditionKey].intensity;
+    const windTarget = randomWindTarget(windIntensity);
     return {
       active: true,
       mode,                 // 'landing' | 'launching'
       bodyId,
       massMultiplier: massMultiplier || 1,
+      conditionKey: resolvedConditionKey, // 'calm' | 'average' | 'difficult' — see LANDING_CONDITIONS; defaults to 'difficult' for any unrecognized/omitted key, same as windIntensity below
+      windIntensity,         // scales ambient wind/roll turbulence for the whole sequence — see LANDING_CONDITIONS
       altitude: mode === 'landing' ? MAX_ALTITUDE : 0,
       descentRate: 0,        // positive = moving toward the ground, regardless of mode
       lateralX: 0, lateralY: 0,
@@ -113,21 +135,21 @@ const Landing = (() => {
       windRetargetIn: randomRetargetDelay(),
       rollAngle: 0,           // degrees, cumulative — purely visual (rotates the rendered scene), not itself scored
       rollRate: 0,            // degrees/sec — THIS is what's scored at touchdown
-      rollWind: 0, rollWindTarget: randomRollWindTarget(), rollWindRetargetIn: randomRollRetargetDelay(),
+      rollWind: 0, rollWindTarget: randomRollWindTarget(windIntensity), rollWindRetargetIn: randomRollRetargetDelay(),
       outcome: null,         // filled in by finishSequence once altitude crosses the far end
     };
   }
 
-  function randomWindTarget() {
+  function randomWindTarget(windIntensity) {
     const angle = Math.random() * Math.PI * 2;
-    const mag = Math.random() * WIND_MAX;
+    const mag = Math.random() * WIND_MAX * (windIntensity == null ? 1 : windIntensity);
     return { x: Math.cos(angle) * mag, y: Math.sin(angle) * mag };
   }
   function randomRetargetDelay() {
     return WIND_RETARGET_MIN + Math.random() * (WIND_RETARGET_MAX - WIND_RETARGET_MIN);
   }
-  function randomRollWindTarget() {
-    return (Math.random() * 2 - 1) * ROLL_WIND_MAX;
+  function randomRollWindTarget(windIntensity) {
+    return (Math.random() * 2 - 1) * ROLL_WIND_MAX * (windIntensity == null ? 1 : windIntensity);
   }
   function randomRollRetargetDelay() {
     return ROLL_WIND_RETARGET_MIN + Math.random() * (ROLL_WIND_RETARGET_MAX - ROLL_WIND_RETARGET_MIN);
@@ -149,7 +171,7 @@ const Landing = (() => {
     // perfectly clean so far.
     seq.windRetargetIn -= dt;
     if (seq.windRetargetIn <= 0) {
-      const t = randomWindTarget();
+      const t = randomWindTarget(seq.windIntensity);
       seq.windTargetX = t.x; seq.windTargetY = t.y;
       seq.windRetargetIn = randomRetargetDelay();
     }
@@ -178,7 +200,7 @@ const Landing = (() => {
     // spiraling unrecoverably if left alone briefly.
     seq.rollWindRetargetIn -= dt;
     if (seq.rollWindRetargetIn <= 0) {
-      seq.rollWindTarget = randomRollWindTarget();
+      seq.rollWindTarget = randomRollWindTarget(seq.windIntensity);
       seq.rollWindRetargetIn = randomRollRetargetDelay();
     }
     seq.rollWind += (seq.rollWindTarget - seq.rollWind) * Math.min(1, ROLL_WIND_EASE_RATE * dt);
@@ -274,6 +296,7 @@ const Landing = (() => {
   return {
     MAX_ALTITUDE, LANDING_ZONE_RADIUS, SAFE_DESCENT_RATE, HARD_LANDING_RATE,
     GATE_COUNT, GATE_SIZE, CARGO_MASS_PENALTY, SAFE_ROLL_RATE, ROLL_DAMAGE_PER_EXCESS,
+    LANDING_CONDITIONS,
     getGateDistances, createSequence, stepSequence,
   };
 })();
